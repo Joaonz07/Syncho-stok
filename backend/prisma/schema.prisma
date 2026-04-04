@@ -1,0 +1,120 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  CLIENT
+}
+
+enum SubscriptionPlan {
+  BASIC
+  PRO
+  PREMIUM
+}
+
+enum MovementType {
+  IN
+  OUT
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model Company {
+  id        String           @id @default(uuid())
+  name      String
+  plan      SubscriptionPlan @default(BASIC)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  users    User[]
+  products Product[]
+  sales    Sale[]
+  messages Message[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  role      UserRole @default(CLIENT)
+  companyId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id])
+  sales    Sale[]
+  messages Message[]
+}
+
+model Product {
+  id        String   @id @default(uuid())
+  name      String
+  code      String
+  price     Decimal  @db.Decimal(10, 2)
+  quantity  Int      @default(0)
+  companyId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company         @relation(fields: [companyId], references: [id])
+  saleItems SaleItem[]
+  movements StockMovement[]
+
+  @@unique([code, companyId])
+}
+
+model Sale {
+  id        String   @id @default(uuid())
+  companyId String
+  userId    String
+  total     Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  company Company    @relation(fields: [companyId], references: [id])
+  user    User       @relation(fields: [userId], references: [id])
+  items   SaleItem[]
+}
+
+model SaleItem {
+  id        String  @id @default(uuid())
+  saleId    String
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+
+  sale    Sale    @relation(fields: [saleId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model StockMovement {
+  id        String       @id @default(uuid())
+  productId String
+  type      MovementType
+  quantity  Int
+  reason    String
+  createdAt DateTime     @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  companyId String
+  senderId  String
+  content   String
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id])
+  sender  User    @relation(fields: [senderId], references: [id])
+}
