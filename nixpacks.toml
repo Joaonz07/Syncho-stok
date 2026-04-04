@@ -1,13 +1,14 @@
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
 [phases.install]
-cmds = ["echo 'deps handled per prefix'"]
+cmds = ["echo 'install handled in build phase'"]
 
 [phases.build]
 cmds = [
-  "npm ci --prefix frontend",
-  "npm run build --prefix frontend",
+  "cd frontend && npm ci && npm run build && cd ..",
   "cp -r frontend/dist/. backend/public/",
-  "npm ci --prefix backend",
-  "npm run build --prefix backend"
+  "cd backend && npm ci && npm run build"
 ]
 
 [start]
