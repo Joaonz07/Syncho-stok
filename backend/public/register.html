@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Syncho Stock - Cadastro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen grid place-items-center p-6">
+  <section class="w-full max-w-xl border border-slate-800 rounded-2xl bg-slate-900 p-8">
+    <h1 class="text-3xl font-bold">Criar conta</h1>
+    <p class="text-slate-300 mt-2">Crie sua empresa e comece a usar o Syncho Stock.</p>
+
+    <form id="register-form" class="mt-6 grid gap-4">
+      <input id="name" placeholder="Seu nome" class="rounded-xl bg-slate-950 border border-slate-700 px-4 py-3" required />
+      <input id="companyName" placeholder="Nome da empresa" class="rounded-xl bg-slate-950 border border-slate-700 px-4 py-3" required />
+      <input id="email" type="email" placeholder="Email" class="rounded-xl bg-slate-950 border border-slate-700 px-4 py-3" required />
+      <input id="password" type="password" placeholder="Senha" class="rounded-xl bg-slate-950 border border-slate-700 px-4 py-3" required />
+      <input id="logoUrl" placeholder="Logo URL (opcional)" class="rounded-xl bg-slate-950 border border-slate-700 px-4 py-3" />
+      <input id="primaryColor" value="#0ea5e9" placeholder="Cor principal" class="rounded-xl bg-slate-950 border border-slate-700 px-4 py-3" />
+      <button id="register-btn" class="rounded-xl px-4 py-3 bg-cyan-500 text-slate-950 font-semibold hover:bg-cyan-400" type="submit">Criar conta</button>
+    </form>
+
+    <p id="register-status" class="mt-4 text-sm"></p>
+    <p class="mt-6 text-sm text-slate-300">Ja tem conta? <a href="/login" class="text-cyan-400">Entrar</a></p>
+  </section>
+
+  <script src="/register.js" defer></script>
+</body>
+</html>

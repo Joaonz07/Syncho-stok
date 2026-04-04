@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Syncho Stock - SaaS de Estoque</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <h1 class="text-xl font-bold tracking-wide">Syncho Stock</h1>
+      <nav class="flex gap-3">
+        <a href="/plans" class="text-slate-300 hover:text-white">Planos</a>
+        <a href="/login" class="rounded-lg px-4 py-2 bg-slate-800 hover:bg-slate-700">Entrar</a>
+        <a href="/register" class="rounded-lg px-4 py-2 bg-cyan-500 text-slate-950 font-semibold hover:bg-cyan-400">Comecar</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="max-w-6xl mx-auto px-6 py-20 grid lg:grid-cols-2 gap-12 items-center">
+      <div>
+        <p class="text-cyan-400 font-semibold mb-3">Plataforma SaaS white-label</p>
+        <h2 class="text-4xl md:text-5xl font-extrabold leading-tight">Gerencie seu estoque com inteligencia</h2>
+        <p class="mt-6 text-slate-300 text-lg">Centralize produtos, vendas, relatorios e atendimento em uma unica plataforma multi-tenant com assinatura recorrente.</p>
+        <div class="mt-8 flex flex-wrap gap-3">
+          <a href="/register" class="rounded-xl px-5 py-3 bg-cyan-500 text-slate-950 font-semibold hover:bg-cyan-400">Comecar</a>
+          <a href="https://wa.me/5500000000000" class="rounded-xl px-5 py-3 border border-slate-700 hover:border-slate-500">Falar com suporte</a>
+        </div>
+      </div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl shadow-cyan-900/20">
+        <h3 class="font-semibold text-xl mb-4">Beneficios</h3>
+        <ul class="space-y-3 text-slate-300">
+          <li>Controle de estoque em tempo real por empresa</li>
+          <li>Relatorios e metricas para decisao rapida</li>
+          <li>Automacao de operacoes e fluxo de vendas</li>
+          <li>Gestao de planos e assinatura por cliente</li>
+          <li>Base pronta para white-label com logo e cor</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="max-w-6xl mx-auto px-6 pb-20" id="planos">
+      <h3 class="text-3xl font-bold mb-8">Planos</h3>
+      <div class="grid md:grid-cols-3 gap-5">
+        <article class="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+          <h4 class="text-xl font-semibold">Basic</h4>
+          <p class="text-3xl font-bold mt-3">R$ 49<span class="text-base text-slate-400">/mes</span></p>
+          <ul class="mt-4 space-y-2 text-slate-300 text-sm">
+            <li>Limite de produtos</li>
+            <li>Fluxo essencial de estoque</li>
+            <li>Suporte padrao</li>
+          </ul>
+        </article>
+        <article class="rounded-2xl border border-cyan-500 bg-slate-900 p-6">
+          <h4 class="text-xl font-semibold">Pro</h4>
+          <p class="text-3xl font-bold mt-3">R$ 129<span class="text-base text-slate-400">/mes</span></p>
+          <ul class="mt-4 space-y-2 text-slate-300 text-sm">
+            <li>Relatorios completos</li>
+            <li>Mais capacidade de produtos</li>
+            <li>Operacao escalavel</li>
+          </ul>
+        </article>
+        <article class="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+          <h4 class="text-xl font-semibold">Premium</h4>
+          <p class="text-3xl font-bold mt-3">R$ 299<span class="text-base text-slate-400">/mes</span></p>
+          <ul class="mt-4 space-y-2 text-slate-300 text-sm">
+            <li>Acesso total</li>
+            <li>Chat prioritario</li>
+            <li>Recursos white-label avancados</li>
+          </ul>
+        </article>
+      </div>
+      <div class="mt-8">
+        <a href="/plans" class="rounded-xl px-5 py-3 bg-cyan-500 text-slate-950 font-semibold hover:bg-cyan-400 inline-block">Ver todos os detalhes dos planos</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

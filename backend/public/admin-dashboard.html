@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Syncho Stock - Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="card dashboard-card admin-wide">
+      <div class="topbar">
+        <div>
+          <p class="eyebrow">Admin Area</p>
+          <h1>Dashboard global ADMIN</h1>
+          <p class="subtitle">Acesso total a empresas, usuarios, produtos, vendas e chats.</p>
+        </div>
+        <button id="logout-btn" class="ghost-btn" type="button">Sair</button>
+      </div>
+
+      <div class="stats" id="admin-stats"></div>
+
+      <div class="actions-row two-cols">
+        <button id="load-admin-data-btn" type="button">Atualizar visao global</button>
+        <button id="load-client-data-btn" type="button">Visualizar /api/dashboard/data</button>
+      </div>
+
+      <section>
+        <h3>Selecionar empresa para analisar</h3>
+        <div class="plan-grid">
+          <select id="company-filter" class="select-field">
+            <option value="">Todas as empresas</option>
+          </select>
+          <button id="apply-company-filter-btn" type="button">Aplicar filtro</button>
+          <button id="clear-company-filter-btn" class="ghost-btn" type="button">Limpar filtro</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Empresas</h3>
+        <div id="companies-table" class="table-wrap"></div>
+      </section>
+
+      <section>
+        <h3>Criar empresa</h3>
+        <div class="plan-grid">
+          <input id="new-company-name" placeholder="Nome da empresa" />
+          <select id="new-company-plan" class="select-field">
+            <option value="BASIC">BASIC</option>
+            <option value="PRO">PRO</option>
+            <option value="PREMIUM">PREMIUM</option>
+          </select>
+          <button id="create-company-btn" type="button">Criar empresa</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Alterar plano da empresa</h3>
+        <div class="plan-grid">
+          <input id="company-id" placeholder="Company ID" />
+          <select id="plan-select" class="select-field">
+            <option value="BASIC">BASIC</option>
+            <option value="PRO">PRO</option>
+            <option value="PREMIUM">PREMIUM</option>
+          </select>
+          <button id="update-plan-btn" type="button">Atualizar plano</button>
+        </div>
+
+        <div class="plan-grid">
+          <input id="subscription-company-id" placeholder="Company ID para status" />
+          <select id="subscription-status" class="select-field">
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="PAST_DUE">PAST_DUE</option>
+            <option value="CANCELED">CANCELED</option>
+            <option value="BLOCKED">BLOCKED</option>
+          </select>
+          <button id="update-subscription-btn" type="button">Bloquear/Desbloquear</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Usuarios</h3>
+        <div id="users-table" class="table-wrap"></div>
+      </section>
+
+      <section>
+        <h3>Criar usuario</h3>
+        <div class="create-user-grid">
+          <input id="new-user-name" placeholder="Nome do usuario" />
+          <input id="new-user-email" placeholder="Email" type="email" />
+          <input id="new-user-password" placeholder="Senha" type="text" />
+          <select id="new-user-role" class="select-field">
+            <option value="CLIENT">CLIENT</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+          <input id="new-user-company-id" placeholder="Company ID (obrigatorio p/ CLIENT)" />
+          <button id="create-user-btn" type="button">Criar usuario</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Produtos</h3>
+        <div id="products-table" class="table-wrap"></div>
+      </section>
+
+      <section>
+        <h3>Vendas</h3>
+        <div id="sales-table" class="table-wrap"></div>
+      </section>
+
+      <section>
+        <h3>Chats</h3>
+        <div id="chats-table" class="table-wrap"></div>
+      </section>
+
+      <p id="admin-status" class="status" aria-live="polite"></p>
+    </section>
+  </main>
+  <script src="/auth-guard.js" defer></script>
+  <script src="/admin-dashboard.js" defer></script>
+</body>
+</html>

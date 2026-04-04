@@ -1,0 +1,14 @@
+[phases.install]
+cmds = ["echo 'deps handled per prefix'"]
+
+[phases.build]
+cmds = [
+  "npm ci --prefix frontend",
+  "npm run build --prefix frontend",
+  "cp -r frontend/dist/. backend/public/",
+  "npm ci --prefix backend",
+  "npm run build --prefix backend"
+]
+
+[start]
+cmd = "node backend/dist/server.js"
