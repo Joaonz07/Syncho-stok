@@ -7,15 +7,18 @@ import { apiFetch as fetch, getApiBaseUrl } from '../lib/api';
 import { getAccessToken } from '../lib/session';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  TrendingUp,
+  LayoutDashboard,
+  BarChart3,
   Package,
   Users,
-  GitBranch,
+  Boxes,
+  KanbanSquare,
+  MessageCircle,
+  Plug,
+  CreditCard,
   Settings,
   LogOut,
-  ChevronRight,
-  Building2,
-  BarChart3
+  ChevronRight
 } from 'lucide-react';
 import {
   XAxis,
@@ -120,6 +123,18 @@ type SalesAnalysis = {
     quantity: number;
     price: number;
   }>;
+};
+
+type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'settings' | 'sales';
+
+type SidebarGroup = 'Comercial' | 'Operacao' | 'Sistema';
+
+type SidebarMenuItem = {
+  name: string;
+  icon: React.ComponentType<{ className?: string }>;
+  path: DashboardView;
+  group: SidebarGroup;
+  adminOnly?: boolean;
 };
 
 type SupportRequestStatus = 'PENDING' | 'IN_REVIEW' | 'DONE';
@@ -247,7 +262,8 @@ const Dashboard = () => {
   const currentUserId = useMemo(() => getUserIdFromJwt(token), [token]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [activeView, setActiveView] = useState<'pipeline' | 'companies' | 'clients' | 'products' | 'settings' | 'sales'>('pipeline');
+  const [activeView, setActiveView] = useState<DashboardView>('pipeline');
+  const [activeMenuName, setActiveMenuName] = useState('Funil de vendas');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [formColumn, setFormColumn] = useState<LeadStatus | null>('NOVO_CONTATO');
@@ -2350,6 +2366,30 @@ const Dashboard = () => {
     return <Navigate to="/login" replace />;
   }
 
+  const menuItems: SidebarMenuItem[] = [
+    { name: 'Dashboard', icon: LayoutDashboard, path: 'companies', group: 'Comercial', adminOnly: true },
+    { name: 'Relatorios', icon: BarChart3, path: 'sales', group: 'Comercial' },
+    { name: 'Funil de vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
+    { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
+    { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
+    { name: 'Estoque', icon: Boxes, path: 'products', group: 'Operacao' },
+    { name: 'Integracoes', icon: Plug, path: 'settings', group: 'Operacao' },
+    { name: 'Chat / Suporte', icon: MessageCircle, path: 'settings', group: 'Sistema' },
+    { name: 'Planos', icon: CreditCard, path: 'settings', group: 'Sistema', adminOnly: true },
+    { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema' }
+  ];
+
+  const visibleMenuItems = menuItems.filter((item) => (item.adminOnly ? role === 'ADMIN' : true));
+  const menuGroups: SidebarGroup[] = ['Comercial', 'Operacao', 'Sistema'];
+  const groupedMenuItems = menuGroups
+    .map((group) => ({ group, items: visibleMenuItems.filter((item) => item.group === group) }))
+    .filter((section) => section.items.length > 0);
+
+  const handleMenuClick = (item: SidebarMenuItem) => {
+    setActiveView(item.path);
+    setActiveMenuName(item.name);
+  };
+
   return (
     <main className={[
       'min-h-screen transition-all duration-500',
@@ -2422,108 +2462,49 @@ const Dashboard = () => {
 
           {/* Nav */}
           <nav className="flex-1 px-3 pb-4">
-            {/* Seção principal */}
-            <p className={['mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
-              Principal
-            </p>
-
-            {[
-              { key: 'pipeline' as const, label: 'Funil de vendas', icon: GitBranch },
-              { key: 'sales' as const, label: 'Vendas', icon: TrendingUp },
-              { key: 'products' as const, label: 'Produtos', icon: Package },
-            ].map(({ key, label, icon: Icon }) => {
-              const isActive = activeView === key;
-              return (
-                <motion.button
-                  key={key}
-                  type="button"
-                  whileHover={{ x: 3 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => setActiveView(key)}
-                  className={[
-                    'sidebar-active-item mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
-                    isActive
-                      ? isDarkTheme
-                        ? 'bg-gradient-to-r from-cyan-500/15 to-blue-500/10 text-cyan-300'
-                        : 'bg-blue-50 text-blue-700'
-                      : isDarkTheme
-                        ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                  ].join(' ')}
-                >
-                  <Icon className={['h-4 w-4 flex-shrink-0', isActive ? (isDarkTheme ? 'text-cyan-400' : 'text-blue-600') : ''].join(' ')} />
-                  <span className="flex-1 text-left">{label}</span>
-                  {isActive && <ChevronRight className="h-3 w-3 opacity-60" />}
-                </motion.button>
-              );
-            })}
-
-            {/* Seção admin */}
-            {role === 'ADMIN' ? (
-              <>
-                <p className={['mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-widest', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
-                  Administração
+            {groupedMenuItems.map((section) => (
+              <div key={section.group} className="mb-4">
+                <p className={['mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
+                  {section.group}
                 </p>
-                {[
-                  { key: 'companies' as const, label: 'Empresas', icon: Building2 },
-                  { key: 'clients' as const, label: 'Clientes', icon: Users },
-                ].map(({ key, label, icon: Icon }) => {
-                  const isActive = activeView === key;
+
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeMenuName === item.name;
+
                   return (
                     <motion.button
-                      key={key}
+                      key={item.name}
                       type="button"
-                      whileHover={{ x: 3 }}
+                      whileHover={{ scale: 1.03 }}
                       whileTap={{ scale: 0.97 }}
-                      onClick={() => setActiveView(key)}
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      onClick={() => handleMenuClick(item)}
                       className={[
-                        'sidebar-active-item mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                        'mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
                         isActive
-                          ? isDarkTheme
-                            ? 'bg-gradient-to-r from-cyan-500/15 to-blue-500/10 text-cyan-300'
-                            : 'bg-blue-50 text-blue-700'
-                          : isDarkTheme
-                            ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                          ? 'bg-blue-500/20 text-blue-400'
+                          : 'text-gray-300 hover:bg-white/10'
                       ].join(' ')}
                     >
-                      <Icon className={['h-4 w-4 flex-shrink-0', isActive ? (isDarkTheme ? 'text-cyan-400' : 'text-blue-600') : ''].join(' ')} />
-                      <span className="flex-1 text-left">{label}</span>
-                      {isActive && <ChevronRight className="h-3 w-3 opacity-60" />}
+                      <Icon className={[
+                        'h-5 w-5 flex-shrink-0',
+                        isActive ? 'text-blue-400' : 'text-gray-400'
+                      ].join(' ')} />
+                      <span className="flex-1 text-left">{item.name}</span>
+
+                      {item.name === 'Chat / Suporte' && supportUnreadCount > 0 ? (
+                        <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                          {supportUnreadCount > 99 ? '99+' : supportUnreadCount}
+                        </span>
+                      ) : isActive ? (
+                        <ChevronRight className="h-3 w-3 opacity-70" />
+                      ) : null}
                     </motion.button>
                   );
                 })}
-              </>
-            ) : null}
-
-            {/* Seção sistema */}
-            <p className={['mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-widest', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
-              Sistema
-            </p>
-            <motion.button
-              type="button"
-              whileHover={{ x: 3 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={() => setActiveView('settings')}
-              className={[
-                'sidebar-active-item mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
-                activeView === 'settings'
-                  ? isDarkTheme
-                    ? 'bg-gradient-to-r from-cyan-500/15 to-blue-500/10 text-cyan-300'
-                    : 'bg-blue-50 text-blue-700'
-                  : isDarkTheme
-                    ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              ].join(' ')}
-            >
-              <Settings className={['h-4 w-4 flex-shrink-0', activeView === 'settings' ? (isDarkTheme ? 'text-cyan-400' : 'text-blue-600') : ''].join(' ')} />
-              <span className="flex-1 text-left">Configurações</span>
-              {supportUnreadCount > 0 ? (
-                <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                  {supportUnreadCount > 99 ? '99+' : supportUnreadCount}
-                </span>
-              ) : activeView === 'settings' ? <ChevronRight className="h-3 w-3 opacity-60" /> : null}
-            </motion.button>
+              </div>
+            ))}
           </nav>
 
           {/* Logout */}
@@ -2552,11 +2533,11 @@ const Dashboard = () => {
           isDarkTheme ? 'border-white/10 bg-gray-950/97 backdrop-blur-xl' : 'border-slate-200 bg-white shadow-lg'
         ].join(' ')}>
           {[
-            { key: 'pipeline' as const, icon: GitBranch, label: 'Funil' },
-            { key: 'sales' as const, icon: TrendingUp, label: 'Vendas' },
+            { key: 'pipeline' as const, icon: KanbanSquare, label: 'Funil' },
+            { key: 'sales' as const, icon: BarChart3, label: 'Vendas' },
             { key: 'products' as const, icon: Package, label: 'Produtos' },
             ...(role === 'ADMIN' ? [
-              { key: 'companies' as const, icon: Building2, label: 'Empresas' },
+              { key: 'companies' as const, icon: LayoutDashboard, label: 'Empresas' },
               { key: 'clients' as const, icon: Users, label: 'Clientes' },
             ] : []),
             { key: 'settings' as const, icon: Settings, label: 'Config' },
