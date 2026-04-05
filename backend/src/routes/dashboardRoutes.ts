@@ -11,9 +11,11 @@ import {
   type PlanName,
   type SubscriptionStatus
 } from '../services/saasService';
+import { getIntegrationWebhookSecret } from '../config/runtime';
 import { sendSupportRequestNotification } from '../services/emailService';
 import { emitSupportMessage } from '../socket/gateway';
 import { emitIntegrationMessage } from '../socket/gateway';
+import { sendMessageByProvider } from '../services/externalMessagingService';
 
 const router = Router();
 
@@ -2060,6 +2062,7 @@ router.post('/integrations/oauth/instagram', requireAuth, async (req, res) => {
 
   const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
   const authCode = String(req.body?.code || '').trim();
+  const customAccountId = String(req.body?.accountId || '').trim() || null;
 
   if (!companyId) {
     return res.status(400).json({ message: 'companyId e obrigatorio para OAuth do Instagram.' });
@@ -2070,7 +2073,7 @@ router.post('/integrations/oauth/instagram', requireAuth, async (req, res) => {
   }
 
   const generatedToken = `ig_${Buffer.from(`${companyId}:${authCode}:${Date.now()}`).toString('base64').slice(0, 28)}`;
-  const accountId = `ig-account-${companyId.slice(0, 8)}`;
+  const accountId = customAccountId || `ig-account-${companyId.slice(0, 8)}`;
 
   const payload: IntegrationConnection = {
     provider: 'INSTAGRAM',
@@ -2179,6 +2182,19 @@ router.post('/integrations/messages/send', requireAuth, async (req, res) => {
     return res.status(403).json({ message: `${provider} nao conectado para esta empresa.` });
   }
 
+  try {
+    await sendMessageByProvider({
+      provider,
+      recipientId: conversationId,
+      content,
+      accessToken: connection.token,
+      accountId: connection.accountId
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Falha ao enviar mensagem para provedor externo.';
+    return res.status(502).json({ message });
+  }
+
   const savedMessage = await insertIntegrationMessageWithAliases({
     provider,
     companyId,
@@ -2194,6 +2210,49 @@ router.post('/integrations/messages/send', requireAuth, async (req, res) => {
   return res.status(201).json({
     message: 'Mensagem enviada com sucesso.',
     data: savedMessage
+  });
+});
+
+router.post('/integrations/webhook/:provider', async (req, res) => {
+  const provider = normalizeIntegrationProvider(req.params.provider);
+  const expectedSecret = getIntegrationWebhookSecret();
+  const providedSecret = String(req.headers['x-integration-secret'] || '').trim();
+
+  if (!provider) {
+    return res.status(400).json({ message: 'Provider invalido para webhook.' });
+  }
+
+  if (expectedSecret && providedSecret !== expectedSecret) {
+    return res.status(403).json({ message: 'Webhook secret invalido.' });
+  }
+
+  const companyId = String(req.body?.companyId || '').trim();
+  const conversationId = String(req.body?.conversationId || '').trim();
+  const userId = String(req.body?.userId || conversationId).trim();
+  const userName = String(req.body?.userName || 'Contato').trim();
+  const content = String(req.body?.content || '').trim();
+
+  if (!companyId || !conversationId || !content) {
+    return res.status(400).json({
+      message: 'companyId, conversationId e content sao obrigatorios no webhook.'
+    });
+  }
+
+  const message = await insertIntegrationMessageWithAliases({
+    provider,
+    companyId,
+    conversationId,
+    userId,
+    userName,
+    senderRole: 'CLIENT',
+    content
+  });
+
+  emitIntegrationMessage(message);
+
+  return res.status(201).json({
+    message: 'Webhook processado com sucesso.',
+    data: message
   });
 });
 

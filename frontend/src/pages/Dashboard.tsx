@@ -765,7 +765,9 @@ const Dashboard = () => {
   const [integrationsCompanyId, setIntegrationsCompanyId] = useState('');
   const [integrationLoading, setIntegrationLoading] = useState(false);
   const [whatsappTokenInput, setWhatsappTokenInput] = useState('');
+  const [whatsappAccountIdInput, setWhatsappAccountIdInput] = useState('');
   const [instagramOAuthCode, setInstagramOAuthCode] = useState('');
+  const [instagramAccountIdInput, setInstagramAccountIdInput] = useState('');
   const [integrationConnections, setIntegrationConnections] = useState<{
     whatsapp: IntegrationConnection | null;
     instagram: IntegrationConnection | null;
@@ -2187,6 +2189,7 @@ const Dashboard = () => {
 
     const targetCompanyId = getIntegrationsTargetCompanyId();
     const tokenValue = whatsappTokenInput.trim();
+    const accountId = whatsappAccountIdInput.trim() || null;
 
     if (!targetCompanyId) {
       setStatus('Selecione uma empresa para conectar WhatsApp.');
@@ -2207,7 +2210,7 @@ const Dashboard = () => {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ companyId: targetCompanyId, token: tokenValue, connected: true })
+        body: JSON.stringify({ companyId: targetCompanyId, token: tokenValue, accountId, connected: true })
       });
       const result = await response.json();
 
@@ -2217,6 +2220,7 @@ const Dashboard = () => {
       }
 
       setWhatsappTokenInput('');
+      setWhatsappAccountIdInput('');
       setStatus('WhatsApp conectado com sucesso.');
       showToast('WhatsApp conectado');
       await fetchIntegrationStatus();
@@ -2234,6 +2238,7 @@ const Dashboard = () => {
 
     const targetCompanyId = getIntegrationsTargetCompanyId();
     const code = instagramOAuthCode.trim();
+    const accountId = instagramAccountIdInput.trim() || null;
 
     if (!targetCompanyId) {
       setStatus('Selecione uma empresa para conectar Instagram.');
@@ -2254,7 +2259,7 @@ const Dashboard = () => {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ companyId: targetCompanyId, code })
+        body: JSON.stringify({ companyId: targetCompanyId, code, accountId })
       });
       const result = await response.json();
 
@@ -2264,6 +2269,7 @@ const Dashboard = () => {
       }
 
       setInstagramOAuthCode('');
+      setInstagramAccountIdInput('');
       setStatus('Instagram conectado com sucesso.');
       showToast('Instagram conectado');
       await fetchIntegrationStatus();
@@ -5287,6 +5293,17 @@ const Dashboard = () => {
                       value={whatsappTokenInput}
                       onChange={(event) => setWhatsappTokenInput(event.target.value)}
                     />
+                    <input
+                      className={themedInputClass}
+                      placeholder="Phone Number ID (opcional, usa env se vazio)"
+                      value={whatsappAccountIdInput}
+                      onChange={(event) => setWhatsappAccountIdInput(event.target.value)}
+                    />
+                    {integrationConnections.whatsapp?.accountId ? (
+                      <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                        Conta conectada: {integrationConnections.whatsapp.accountId}
+                      </p>
+                    ) : null}
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -5339,6 +5356,17 @@ const Dashboard = () => {
                       value={instagramOAuthCode}
                       onChange={(event) => setInstagramOAuthCode(event.target.value)}
                     />
+                    <input
+                      className={themedInputClass}
+                      placeholder="Instagram Business Account ID (opcional)"
+                      value={instagramAccountIdInput}
+                      onChange={(event) => setInstagramAccountIdInput(event.target.value)}
+                    />
+                    {integrationConnections.instagram?.accountId ? (
+                      <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                        Conta conectada: {integrationConnections.instagram.accountId}
+                      </p>
+                    ) : null}
                     <div className="flex gap-2">
                       <button
                         type="button"
