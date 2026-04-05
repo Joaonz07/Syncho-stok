@@ -202,38 +202,6 @@ type SupportChatMessage = {
   createdAt: string;
 };
 
-type IntegrationProvider = 'WHATSAPP';
-
-type IntegrationConnection = {
-  provider: IntegrationProvider;
-  companyId: string;
-  connected: boolean;
-  token: string | null;
-  accountId: string | null;
-  updatedAt: string;
-};
-
-type IntegrationConversation = {
-  id: string;
-  userId: string;
-  userName: string;
-  lastMessage: string;
-  lastAt: string;
-  unread: number;
-};
-
-type IntegrationMessage = {
-  id: string;
-  provider: IntegrationProvider;
-  companyId: string;
-  conversationId: string;
-  userId: string;
-  userName: string;
-  senderRole: 'ADMIN' | 'CLIENT';
-  content: string;
-  createdAt: string;
-};
-
 type Toast = {
   id: number;
   message: string;
@@ -330,6 +298,36 @@ const getUserDisplayNameFromJwt = (jwt: string) => {
     return email.split('@')[0] || 'Usuário';
   } catch (_error) {
     return 'Usuário';
+  }
+};
+
+const getCompanyIdFromJwt = (jwt: string) => {
+  try {
+    const parts = String(jwt || '').split('.');
+
+    if (parts.length < 2) {
+      return '';
+    }
+
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(base64)) as {
+      company_id?: string;
+      companyId?: string;
+      app_metadata?: { company_id?: string; companyId?: string };
+      user_metadata?: { company_id?: string; companyId?: string };
+    };
+
+    return String(
+      payload.company_id
+      || payload.companyId
+      || payload.app_metadata?.company_id
+      || payload.app_metadata?.companyId
+      || payload.user_metadata?.company_id
+      || payload.user_metadata?.companyId
+      || ''
+    ).trim();
+  } catch (_error) {
+    return '';
   }
 };
 
@@ -650,7 +648,7 @@ const DEFAULT_ADMIN_PLANS: AdminPlanConfig[] = [
     id: 'BASIC',
     name: 'BASIC',
     price: 199,
-    features: ['CRM essencial', 'Funil de vendas', 'Relatorios basicos']
+    features: ['CRM essencial', 'Vendas', 'Relatorios basicos']
   },
   {
     id: 'PRO',
@@ -672,10 +670,11 @@ const Dashboard = () => {
   const currentUserId = useMemo(() => getUserIdFromJwt(token), [token]);
   const displayUserName = useMemo(() => getUserDisplayNameFromJwt(token), [token]);
   const displayUserEmail = useMemo(() => getUserEmailFromJwt(token), [token]);
+  const companyIdFromJwt = useMemo(() => getCompanyIdFromJwt(token), [token]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [activeView, setActiveView] = useState<DashboardView>('pipeline');
-  const [activeMenuName, setActiveMenuName] = useState('Funil de vendas');
+  const [activeMenuName, setActiveMenuName] = useState('Vendas');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [formColumn, setFormColumn] = useState<LeadStatus | null>('NOVO_CONTATO');
@@ -761,17 +760,7 @@ const Dashboard = () => {
   const [supportAdminOnline, setSupportAdminOnline] = useState(false);
   const [supportTypingText, setSupportTypingText] = useState('');
   const [supportUnreadCount, setSupportUnreadCount] = useState(0);
-  const [integrationsCompanyId, setIntegrationsCompanyId] = useState('');
-  const [integrationLoading, setIntegrationLoading] = useState(false);
-  const [whatsappTokenInput, setWhatsappTokenInput] = useState('');
-  const [whatsappAccountIdInput, setWhatsappAccountIdInput] = useState('');
-  const [integrationConnections, setIntegrationConnections] = useState<{
-    whatsapp: IntegrationConnection | null;
-  }>({ whatsapp: null });
-  const [integrationConversations, setIntegrationConversations] = useState<IntegrationConversation[]>([]);
-  const [selectedIntegrationConversationId, setSelectedIntegrationConversationId] = useState<string | null>(null);
-  const [integrationMessages, setIntegrationMessages] = useState<IntegrationMessage[]>([]);
-  const [integrationReply, setIntegrationReply] = useState('');
+  const [whatsAppWebFrameKey, setWhatsAppWebFrameKey] = useState(0);
   const [adminSection, setAdminSection] = useState<'overview' | 'companies' | 'users' | 'plans' | 'support'>('overview');
   const [planCatalog, setPlanCatalog] = useState<AdminPlanConfig[]>(() => {
     if (typeof window === 'undefined') {
@@ -831,6 +820,10 @@ const Dashboard = () => {
   };
   const [salesCompanyId, setSalesCompanyId] = useState('');
   const [saleLines, setSaleLines] = useState<SaleLine[]>([{ id: 1, productId: '', quantity: 1 }]);
+  const [saleCustomerId, setSaleCustomerId] = useState('quick-sale');
+  const [salePaymentMethod, setSalePaymentMethod] = useState<'cash' | 'pix' | 'card'>('pix');
+  const [saleHistorySearch, setSaleHistorySearch] = useState('');
+  const [saleHistoryStatusFilter, setSaleHistoryStatusFilter] = useState<'ALL' | 'CONCLUIDA'>('ALL');
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesAnalysis, setSalesAnalysis] = useState<SalesAnalysis | null>(null);
   const [salesChartMetric, setSalesChartMetric] = useState<'quantity' | 'price'>('quantity');
@@ -1288,6 +1281,131 @@ const Dashboard = () => {
     return ((last - previous) / previous) * 100;
   }, [monthlySalesSeries]);
 
+  const salesCustomerOptions = useMemo(() => {
+    const unique = new Map<string, string>();
+
+    for (const lead of leads) {
+      const id = String(lead.id || '').trim();
+      const customerName = String(lead.name || '').trim();
+
+      if (!id || !customerName) {
+        continue;
+      }
+
+      if (!unique.has(id)) {
+        unique.set(id, customerName);
+      }
+    }
+
+    return Array.from(unique.entries()).map(([id, name]) => ({ id, name }));
+  }, [leads]);
+
+  const selectedSalesCustomerName = useMemo(() => {
+    if (saleCustomerId === 'quick-sale') {
+      return null;
+    }
+
+    return salesCustomerOptions.find((customer) => customer.id === saleCustomerId)?.name || null;
+  }, [saleCustomerId, salesCustomerOptions]);
+
+  const salesCartItems = useMemo(() => {
+    return saleLines
+      .map((line) => {
+        const product = products.find((item) => item.id === line.productId) || null;
+        const quantity = Number(line.quantity || 0);
+        const price = Number(product?.price || 0);
+        const lineTotal = price * quantity;
+
+        return {
+          lineId: line.id,
+          productId: line.productId,
+          product,
+          quantity,
+          price,
+          lineTotal
+        };
+      })
+      .filter((item) => item.product && item.quantity > 0);
+  }, [saleLines, products]);
+
+  const salesCartTotal = useMemo(
+    () => salesCartItems.reduce((acc, item) => acc + Number(item.lineTotal || 0), 0),
+    [salesCartItems]
+  );
+
+  const salesTodayTotal = useMemo(() => {
+    const todayKey = new Date().toDateString();
+
+    return (salesAnalysis?.recentSales || []).reduce((acc, sale) => {
+      const createdAt = new Date(String(sale.createdAt || ''));
+
+      if (Number.isNaN(createdAt.getTime()) || createdAt.toDateString() !== todayKey) {
+        return acc;
+      }
+
+      return acc + Number(sale.total || 0);
+    }, 0);
+  }, [salesAnalysis]);
+
+  const salesMonthlyTotal = useMemo(() => {
+    const now = new Date();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+
+    return (salesAnalysis?.recentSales || []).reduce((acc, sale) => {
+      const createdAt = new Date(String(sale.createdAt || ''));
+
+      if (
+        Number.isNaN(createdAt.getTime())
+        || createdAt.getMonth() !== month
+        || createdAt.getFullYear() !== year
+      ) {
+        return acc;
+      }
+
+      return acc + Number(sale.total || 0);
+    }, 0);
+  }, [salesAnalysis]);
+
+  const bestSellingProductLabel = useMemo(() => {
+    if (!lowStockChartData.length) {
+      return 'Sem dados';
+    }
+
+    const best = [...lowStockChartData].sort((left, right) => Number(right.value || 0) - Number(left.value || 0))[0];
+    return String(best?.name || 'Sem dados');
+  }, [lowStockChartData]);
+
+  const salesHistoryRows = useMemo(() => {
+    return (salesAnalysis?.recentSales || []).map((sale) => ({
+      id: String(sale.id || ''),
+      customer: 'Venda rapida',
+      total: Number(sale.total || 0),
+      createdAt: String(sale.createdAt || ''),
+      status: 'CONCLUIDA' as const
+    }));
+  }, [salesAnalysis]);
+
+  const filteredSalesHistoryRows = useMemo(() => {
+    const search = saleHistorySearch.trim().toLowerCase();
+
+    return salesHistoryRows.filter((row) => {
+      if (saleHistoryStatusFilter !== 'ALL' && row.status !== saleHistoryStatusFilter) {
+        return false;
+      }
+
+      if (!search) {
+        return true;
+      }
+
+      return (
+        row.customer.toLowerCase().includes(search)
+        || row.id.toLowerCase().includes(search)
+        || formatCurrency(row.total).toLowerCase().includes(search)
+      );
+    });
+  }, [saleHistorySearch, saleHistoryStatusFilter, salesHistoryRows]);
+
   const summaryCards = useMemo(
     () => [
       {
@@ -1715,8 +1833,22 @@ const Dashboard = () => {
       return selectedForAdmin.trim() || '';
     }
 
-    return String(companyId || '').trim();
+    return String(companyId || companyIdFromJwt || '').trim();
   };
+
+  useEffect(() => {
+    if (role === 'ADMIN') {
+      return;
+    }
+
+    const linkedCompanyId = String(companyId || companyIdFromJwt || '').trim();
+
+    if (!linkedCompanyId || linkedCompanyId === productCompanyId) {
+      return;
+    }
+
+    setProductCompanyId(linkedCompanyId);
+  }, [role, companyId, companyIdFromJwt, productCompanyId]);
 
   const fetchProducts = async () => {
     if (!token) {
@@ -1727,7 +1859,7 @@ const Dashboard = () => {
 
     if (!targetCompanyId) {
       setProducts([]);
-      setStatus('Selecione uma empresa para visualizar produtos.');
+      setStatus(role === 'ADMIN' ? 'Selecione uma empresa para visualizar produtos.' : 'Empresa vinculada nao encontrada para visualizar produtos.');
       return;
     }
 
@@ -2136,257 +2268,6 @@ const Dashboard = () => {
     }
   };
 
-  const getIntegrationsTargetCompanyId = () => {
-    return getTargetCompanyId(integrationsCompanyId || settingsCompanyId);
-  };
-
-  const fetchIntegrationStatus = async () => {
-    if (!token) {
-      return;
-    }
-
-    const targetCompanyId = getIntegrationsTargetCompanyId();
-
-    if (!targetCompanyId) {
-      setStatus('Selecione uma empresa para carregar integracoes.');
-      return;
-    }
-
-    setIntegrationLoading(true);
-
-    try {
-      const response = await fetch(
-        `/api/dashboard/integrations/status?companyId=${encodeURIComponent(targetCompanyId)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const result = await response.json();
-
-      if (!response.ok) {
-        setStatus(result.message || 'Falha ao carregar status de integracoes.');
-        return;
-      }
-
-      setIntegrationConnections({
-        whatsapp: (result.integrations?.whatsapp || null) as IntegrationConnection | null
-      });
-    } catch (_error) {
-      setStatus('Erro de rede ao carregar status de integracoes.');
-    } finally {
-      setIntegrationLoading(false);
-    }
-  };
-
-  const connectWhatsApp = async () => {
-    if (!token) {
-      return;
-    }
-
-    const targetCompanyId = getIntegrationsTargetCompanyId();
-    const tokenValue = whatsappTokenInput.trim();
-    const accountId = whatsappAccountIdInput.trim() || null;
-
-    if (!targetCompanyId) {
-      setStatus('Selecione uma empresa para conectar WhatsApp.');
-      return;
-    }
-
-    if (!tokenValue) {
-      setStatus('Informe o token/API key do WhatsApp.');
-      return;
-    }
-
-    setIntegrationLoading(true);
-
-    try {
-      const response = await fetch('/api/dashboard/integrations/connect/WHATSAPP', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ companyId: targetCompanyId, token: tokenValue, accountId, connected: true })
-      });
-      const result = await response.json();
-
-      if (!response.ok) {
-        setStatus(result.message || 'Falha ao conectar WhatsApp.');
-        return;
-      }
-
-      setWhatsappTokenInput('');
-      setWhatsappAccountIdInput('');
-      setStatus('WhatsApp conectado com sucesso.');
-      showToast('WhatsApp conectado');
-      await fetchIntegrationStatus();
-    } catch (_error) {
-      setStatus('Erro de rede ao conectar WhatsApp.');
-    } finally {
-      setIntegrationLoading(false);
-    }
-  };
-
-  const openWhatsAppWeb = () => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.open('https://web.whatsapp.com/', '_blank', 'noopener,noreferrer');
-  };
-
-  const disconnectIntegration = async (provider: IntegrationProvider) => {
-    if (!token) {
-      return;
-    }
-
-    const targetCompanyId = getIntegrationsTargetCompanyId();
-
-    if (!targetCompanyId) {
-      setStatus('Selecione uma empresa para desconectar a integracao.');
-      return;
-    }
-
-    setIntegrationLoading(true);
-
-    try {
-      const response = await fetch(`/api/dashboard/integrations/connect/${provider}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ companyId: targetCompanyId, connected: false })
-      });
-      const result = await response.json();
-
-      if (!response.ok) {
-        setStatus(result.message || `Falha ao desconectar ${provider}.`);
-        return;
-      }
-
-      setStatus(`${provider} desconectado com sucesso.`);
-      showToast(`${provider} desconectado`);
-      await fetchIntegrationStatus();
-    } catch (_error) {
-      setStatus(`Erro de rede ao desconectar ${provider}.`);
-    } finally {
-      setIntegrationLoading(false);
-    }
-  };
-
-  const fetchIntegrationConversations = async () => {
-    if (!token) {
-      return;
-    }
-
-    const targetCompanyId = getIntegrationsTargetCompanyId();
-
-    if (!targetCompanyId) {
-      setIntegrationConversations([]);
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `/api/dashboard/integrations/conversations?companyId=${encodeURIComponent(targetCompanyId)}&provider=WHATSAPP`,
-        { headers: { Authorization: `Bearer ${token}` }
-      });
-      const result = await response.json();
-
-      if (!response.ok) {
-        setStatus(result.message || 'Falha ao carregar conversas de integracao.');
-        return;
-      }
-
-      setIntegrationConversations((result.conversations || []) as IntegrationConversation[]);
-    } catch (_error) {
-      setStatus('Erro de rede ao carregar conversas de integracao.');
-    }
-  };
-
-  const fetchIntegrationMessages = async (conversationId: string | null = selectedIntegrationConversationId) => {
-    if (!token || !conversationId) {
-      setIntegrationMessages([]);
-      return;
-    }
-
-    const targetCompanyId = getIntegrationsTargetCompanyId();
-
-    if (!targetCompanyId) {
-      setIntegrationMessages([]);
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `/api/dashboard/integrations/messages?companyId=${encodeURIComponent(targetCompanyId)}&provider=WHATSAPP&conversationId=${encodeURIComponent(conversationId)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const result = await response.json();
-
-      if (!response.ok) {
-        setStatus(result.message || 'Falha ao carregar mensagens da integracao.');
-        return;
-      }
-
-      setIntegrationMessages((result.messages || []) as IntegrationMessage[]);
-    } catch (_error) {
-      setStatus('Erro de rede ao carregar mensagens da integracao.');
-    }
-  };
-
-  const sendIntegrationMessage = async () => {
-    if (!token) {
-      return;
-    }
-
-    const targetCompanyId = getIntegrationsTargetCompanyId();
-    const conversation = integrationConversations.find((item) => item.id === selectedIntegrationConversationId);
-    const content = integrationReply.trim();
-
-    if (!targetCompanyId || !conversation || !content) {
-      return;
-    }
-
-    setIntegrationReply('');
-
-    try {
-      const response = await fetch('/api/dashboard/integrations/messages/send', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          companyId: targetCompanyId,
-          provider: 'WHATSAPP',
-          conversationId: conversation.id,
-          userId: conversation.userId,
-          userName: conversation.userName,
-          content
-        })
-      });
-      const result = await response.json();
-
-      if (!response.ok) {
-        setStatus(result.message || 'Falha ao enviar mensagem da integracao.');
-        return;
-      }
-
-      setIntegrationMessages((current) => {
-        const incoming = result.data as IntegrationMessage;
-        if (!incoming || current.some((item) => item.id === incoming.id)) {
-          return current;
-        }
-
-        return [...current, incoming];
-      });
-
-      await fetchIntegrationConversations();
-    } catch (_error) {
-      setStatus('Erro de rede ao enviar mensagem da integracao.');
-    }
-  };
-
   const fetchSalesAnalysis = async (options?: { silent?: boolean }) => {
     if (!token) {
       return;
@@ -2502,17 +2383,6 @@ const Dashboard = () => {
   }, [activeView, token, settingsCompanyId]);
 
   useEffect(() => {
-    if (activeView === 'integrations') {
-      void fetchIntegrationStatus();
-      void fetchIntegrationConversations();
-
-      if (selectedIntegrationConversationId) {
-        void fetchIntegrationMessages(selectedIntegrationConversationId);
-      }
-    }
-  }, [activeView, token, integrationsCompanyId, selectedIntegrationConversationId]);
-
-  useEffect(() => {
     if (activeView === 'chat') {
       setSupportUnreadCount(0);
       void fetchSupportRequests();
@@ -2610,28 +2480,6 @@ const Dashboard = () => {
       }
     });
 
-    socket.on('integration:new-message', (incoming: IntegrationMessage) => {
-      if (incoming.provider !== 'WHATSAPP') {
-        return;
-      }
-
-      setIntegrationMessages((current) => {
-        if (current.some((msg) => msg.id === incoming.id)) {
-          return current;
-        }
-
-        return [...current, incoming];
-      });
-
-      void fetchIntegrationConversations();
-    });
-
-    socket.on('integration:error', (payload: { message?: string }) => {
-      if (payload?.message) {
-        setStatus(payload.message);
-      }
-    });
-
     return () => {
       socket.off('connect');
       socket.off('disconnect');
@@ -2639,8 +2487,6 @@ const Dashboard = () => {
       socket.off('support:presence');
       socket.off('support:typing');
       socket.off('support:error');
-      socket.off('integration:new-message');
-      socket.off('integration:error');
       socket.disconnect();
       supportSocketRef.current = null;
       setSupportChatConnected(false);
@@ -2663,23 +2509,6 @@ const Dashboard = () => {
 
     supportSocketRef.current.emit('support:join', { companyId: targetCompanyId });
   }, [activeView, settingsCompanyId]);
-
-  useEffect(() => {
-    if (activeView !== 'integrations') {
-      return;
-    }
-
-    const targetCompanyId = getIntegrationsTargetCompanyId();
-
-    if (!targetCompanyId || !supportSocketRef.current?.connected) {
-      return;
-    }
-
-    supportSocketRef.current.emit('integration:join', {
-      companyId: targetCompanyId,
-      provider: 'WHATSAPP'
-    });
-  }, [activeView, integrationsCompanyId, settingsCompanyId]);
 
   useEffect(() => {
     if (activeView === 'sales') {
@@ -3064,7 +2893,7 @@ const Dashboard = () => {
     const targetCompanyId = getTargetCompanyId(productCompanyId);
 
     if (!targetCompanyId) {
-      setStatus('Selecione uma empresa para criar produto.');
+      setStatus(role === 'ADMIN' ? 'Selecione uma empresa para criar produto.' : 'Empresa vinculada nao encontrada para criar produto.');
       return;
     }
 
@@ -3132,7 +2961,7 @@ const Dashboard = () => {
     const targetCompanyId = getTargetCompanyId(productCompanyId);
 
     if (!targetCompanyId) {
-      setStatus('Selecione uma empresa para editar produto.');
+      setStatus(role === 'ADMIN' ? 'Selecione uma empresa para editar produto.' : 'Empresa vinculada nao encontrada para editar produto.');
       return;
     }
 
@@ -3178,7 +3007,7 @@ const Dashboard = () => {
     const targetCompanyId = getTargetCompanyId(productCompanyId);
 
     if (!targetCompanyId) {
-      setStatus('Selecione uma empresa para excluir produto.');
+      setStatus(role === 'ADMIN' ? 'Selecione uma empresa para excluir produto.' : 'Empresa vinculada nao encontrada para excluir produto.');
       return;
     }
 
@@ -3343,6 +3172,19 @@ const Dashboard = () => {
     });
   };
 
+  const stepSaleLineQuantity = (lineId: number, delta: number) => {
+    setSaleLines((currentLines) =>
+      currentLines.map((line) => {
+        if (line.id !== lineId) {
+          return line;
+        }
+
+        const next = Math.max(1, Number(line.quantity || 1) + delta);
+        return { ...line, quantity: next };
+      })
+    );
+  };
+
   const checkoutSale = async () => {
     if (!token) {
       return;
@@ -3378,7 +3220,9 @@ const Dashboard = () => {
         },
         body: JSON.stringify({
           companyId: targetCompanyId,
-          items
+          items,
+          paymentMethod: salePaymentMethod,
+          customerName: selectedSalesCustomerName
         })
       });
       const result = await response.json();
@@ -3389,6 +3233,8 @@ const Dashboard = () => {
       }
 
       setSaleLines([{ id: Date.now(), productId: '', quantity: 1 }]);
+      setSaleCustomerId('quick-sale');
+      setSalePaymentMethod('pix');
       setStatus('Venda finalizada com sucesso e estoque atualizado.');
       showToast('Venda concluida');
       await fetchProducts();
@@ -3683,7 +3529,7 @@ const Dashboard = () => {
     { name: 'Admin SaaS', icon: Sparkles, path: 'admin', group: 'Comercial', adminOnly: true },
     { name: 'Relatorios', icon: BarChart3, path: 'sales', group: 'Comercial' },
     { name: 'Analise', icon: Activity, path: 'analytics', group: 'Comercial' },
-    { name: 'Funil de vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
+    { name: 'Vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
     { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
     { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
     { name: 'Estoque', icon: Boxes, path: 'inventory', group: 'Operacao' },
@@ -3902,7 +3748,7 @@ const Dashboard = () => {
           {/* ── VIEW: PIPELINE ── */}
 
           {/* ── VIEW: PIPELINE ── */}
-          {activeView === 'pipeline' ? (
+          {activeView === 'pipeline' && false ? (
             <>
           <motion.section
             initial={{ opacity: 0, y: 18 }}
@@ -4034,7 +3880,7 @@ const Dashboard = () => {
 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className={themedTitleClass}>Funil de vendas</h1>
+              <h1 className={themedTitleClass}>Vendas</h1>
               <p className={themedSubtextClass}>Arraste os cards entre as etapas para atualizar o status.</p>
             </div>
             <motion.button
@@ -5191,95 +5037,8 @@ const Dashboard = () => {
               ].join(' ')}>
                 <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Integracoes</h1>
                 <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                  Conecte seu canal WhatsApp e acesse rapidamente o WhatsApp Web para atendimento.
+                  Atendimento direto no WhatsApp Web dentro desta tela.
                 </p>
-
-                {role === 'ADMIN' ? (
-                  <div className="mt-4 max-w-sm">
-                    <select
-                      className={themedSelectClass}
-                      value={integrationsCompanyId}
-                      onChange={(event) => setIntegrationsCompanyId(event.target.value)}
-                    >
-                      <option className={themedOptionClass} value="">Selecione a empresa</option>
-                      {companyOptions.map((option) => (
-                        <option className={themedOptionClass} key={option.id} value={option.id}>{option.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="grid gap-4 xl:grid-cols-1">
-                <motion.div
-                  whileHover={{ y: -3 }}
-                  className={[
-                    'rounded-2xl border p-5',
-                    isDarkTheme ? 'border-emerald-500/20 bg-[#0d1117] shadow-[0_0_18px_rgba(16,185,129,0.14)]' : 'border-slate-200 bg-white'
-                  ].join(' ')}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h2 className={['text-base font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>WhatsApp</h2>
-                      <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                        Token/API key para envio e resposta de mensagens.
-                      </p>
-                    </div>
-                    <span className={[
-                      'rounded-full px-2 py-0.5 text-xs font-semibold',
-                      integrationConnections.whatsapp?.connected
-                        ? 'bg-emerald-500/15 text-emerald-300'
-                        : 'bg-rose-500/15 text-rose-300'
-                    ].join(' ')}>
-                      {integrationConnections.whatsapp?.connected ? 'Connected' : 'Not connected'}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 grid gap-3">
-                    <input
-                      className={themedInputClass}
-                      placeholder="Informe token/API key do WhatsApp"
-                      value={whatsappTokenInput}
-                      onChange={(event) => setWhatsappTokenInput(event.target.value)}
-                    />
-                    <input
-                      className={themedInputClass}
-                      placeholder="Phone Number ID (opcional, usa env se vazio)"
-                      value={whatsappAccountIdInput}
-                      onChange={(event) => setWhatsappAccountIdInput(event.target.value)}
-                    />
-                    {integrationConnections.whatsapp?.accountId ? (
-                      <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                        Conta conectada: {integrationConnections.whatsapp.accountId}
-                      </p>
-                    ) : null}
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={connectWhatsApp}
-                        disabled={integrationLoading}
-                        className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-emerald-500 disabled:opacity-70"
-                      >
-                        Connect WhatsApp
-                      </button>
-                      <button
-                        type="button"
-                        onClick={openWhatsAppWeb}
-                        className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500"
-                      >
-                        Abrir WhatsApp Web
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void disconnectIntegration('WHATSAPP')}
-                        disabled={integrationLoading}
-                        className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-70' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-70'}
-                      >
-                        Desconectar
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
               </div>
 
               <div className={[
@@ -5288,146 +5047,31 @@ const Dashboard = () => {
               ].join(' ')}>
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Chat de Integracoes</h3>
+                    <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>WhatsApp Web</h3>
                     <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                      Conversas do WhatsApp agrupadas por usuario com resposta em tempo real.
+                      Se a sessão estiver expirada, escaneie o QR Code diretamente no painel abaixo.
                     </p>
                   </div>
-                  <div className="flex gap-2">
-                    <span className={[
-                      'rounded-xl border px-3 py-1.5 text-xs font-semibold',
-                      isDarkTheme ? 'border-cyan-400/40 bg-cyan-500/15 text-cyan-300' : 'border-blue-300 bg-blue-50 text-blue-700'
-                    ].join(' ')}>
-                      Canal: WhatsApp
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void fetchIntegrationConversations();
-                        if (selectedIntegrationConversationId) {
-                          void fetchIntegrationMessages(selectedIntegrationConversationId);
-                        }
-                      }}
-                      className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'}
-                    >
-                      Atualizar
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWhatsAppWebFrameKey((current) => current + 1)}
+                    className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'}
+                  >
+                    Recarregar painel
+                  </button>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-                  <div className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5' : 'rounded-xl border border-slate-200 bg-white'}>
-                    <div className={['border-b px-4 py-3 text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'border-white/10 text-slate-400' : 'border-slate-100 text-slate-500'].join(' ')}>
-                      Conversas
-                    </div>
-                    <div className="max-h-[420px] overflow-y-auto">
-                      {integrationConversations.length ? (
-                        integrationConversations.map((conversation) => {
-                          const selected = selectedIntegrationConversationId === conversation.id;
-                          return (
-                            <button
-                              key={conversation.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedIntegrationConversationId(conversation.id);
-                                void fetchIntegrationMessages(conversation.id);
-                              }}
-                              className={[
-                                'w-full border-b px-4 py-3 text-left transition-all',
-                                isDarkTheme ? 'border-white/5' : 'border-slate-100',
-                                selected
-                                  ? isDarkTheme ? 'bg-cyan-500/10' : 'bg-blue-50'
-                                  : isDarkTheme ? 'hover:bg-white/5' : 'hover:bg-slate-50'
-                              ].join(' ')}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <p className={['truncate text-sm font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{conversation.userName}</p>
-                                {conversation.unread > 0 ? (
-                                  <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold text-rose-300">{conversation.unread}</span>
-                                ) : null}
-                              </div>
-                              <p className={['mt-1 truncate text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>{conversation.lastMessage}</p>
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <p className={['px-4 py-6 text-center text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                          Nenhuma conversa encontrada para este canal.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className={isDarkTheme ? 'flex flex-col rounded-xl border border-white/10 bg-white/5' : 'flex flex-col rounded-xl border border-slate-200 bg-white'}>
-                    <div className={['border-b px-4 py-3', isDarkTheme ? 'border-white/10' : 'border-slate-100'].join(' ')}>
-                      <p className={['text-sm font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>
-                        {selectedIntegrationConversationId
-                          ? integrationConversations.find((item) => item.id === selectedIntegrationConversationId)?.userName || 'Conversa'
-                          : 'Selecione uma conversa'}
-                      </p>
-                    </div>
-
-                    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4" style={{ minHeight: '300px', maxHeight: '420px' }}>
-                      {selectedIntegrationConversationId ? (
-                        integrationMessages.length ? (
-                          integrationMessages.map((message) => {
-                            const isMine = message.senderRole === role;
-                            return (
-                              <div key={message.id} className={['flex', isMine ? 'justify-end' : 'justify-start'].join(' ')}>
-                                <div className={[
-                                  'max-w-[80%] rounded-2xl px-3 py-2',
-                                  isMine
-                                    ? 'rounded-br-md bg-cyan-600 text-white'
-                                    : isDarkTheme ? 'rounded-bl-md bg-slate-700/60 text-slate-100' : 'rounded-bl-md bg-slate-100 text-slate-800'
-                                ].join(' ')}>
-                                  <p className={['text-[11px] font-semibold opacity-80', isMine ? 'text-cyan-100' : isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                                    {message.userName} · {message.senderRole}
-                                  </p>
-                                  <p className="mt-0.5 text-sm whitespace-pre-wrap">{message.content}</p>
-                                  <p className={['mt-1 text-right text-[10px] opacity-70', isMine ? 'text-cyan-100' : ''].join(' ')}>{String(message.createdAt || '').slice(11, 16)}</p>
-                                </div>
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <p className={['py-10 text-center text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                            Nenhuma mensagem nesta conversa.
-                          </p>
-                        )
-                      ) : (
-                        <p className={['py-10 text-center text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                          Escolha uma conversa para responder.
-                        </p>
-                      )}
-                    </div>
-
-                    <div className={['flex gap-2 border-t p-3', isDarkTheme ? 'border-white/10' : 'border-slate-100'].join(' ')}>
-                      <input
-                        className={[
-                          'flex-1 rounded-xl border px-3 py-2 text-sm outline-none transition-all',
-                          isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-cyan-400' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400'
-                        ].join(' ')}
-                        placeholder="Digite sua resposta..."
-                        value={integrationReply}
-                        onChange={(event) => setIntegrationReply(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' && !event.shiftKey) {
-                            event.preventDefault();
-                            void sendIntegrationMessage();
-                          }
-                        }}
-                        disabled={!selectedIntegrationConversationId}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void sendIntegrationMessage()}
-                        disabled={!selectedIntegrationConversationId || !integrationReply.trim()}
-                        className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500 disabled:opacity-60"
-                      >
-                        Responder
-                      </button>
-                    </div>
-                  </div>
+                <div className={[
+                  'overflow-hidden rounded-xl border',
+                  isDarkTheme ? 'border-white/10 bg-black/25' : 'border-slate-200 bg-slate-50'
+                ].join(' ')}>
+                  <iframe
+                    key={whatsAppWebFrameKey}
+                    title="WhatsApp Web"
+                    src="https://web.whatsapp.com/"
+                    className="h-[72vh] min-h-[640px] w-full"
+                    referrerPolicy="no-referrer"
+                  />
                 </div>
               </div>
             </motion.div>
@@ -5932,7 +5576,7 @@ const Dashboard = () => {
             </motion.div>
           ) : null}
 
-          {activeView === 'sales' ? (
+          {activeView === 'sales' || activeView === 'pipeline' ? (
             <div className="grid gap-6">
               <div className={[
                 'rounded-2xl p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg',
@@ -5941,13 +5585,13 @@ const Dashboard = () => {
                   : 'border border-slate-200 bg-white'
               ].join(' ')}>
                 <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Vendas</h1>
-                <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-500'].join(' ')}>Selecione produtos, registre a venda e atualize o estoque automaticamente.</p>
+                <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-500'].join(' ')}>Sistema completo de vendas com CRM + PDV: seleção de produtos, carrinho, cliente opcional, pagamento e histórico.</p>
 
-                <div className="mt-4 grid gap-3">
-                  {role === 'ADMIN' ? (
+                {role === 'ADMIN' ? (
+                  <div className="mt-4 max-w-sm">
                     <select
                       className={[
-                        'rounded-xl px-3 py-2 text-sm outline-none transition-all focus:border-blue-400',
+                        'w-full rounded-xl px-3 py-2 text-sm outline-none transition-all focus:border-blue-400',
                         isDarkTheme
                           ? 'border border-white/10 bg-white/5 text-slate-100 focus:ring-2 focus:ring-cyan-500/40'
                           : 'border border-slate-200 bg-slate-50'
@@ -5960,75 +5604,268 @@ const Dashboard = () => {
                         <option className={isDarkTheme ? 'bg-slate-900 text-slate-100' : ''} key={option.id} value={option.id}>{option.name}</option>
                       ))}
                     </select>
-                  ) : null}
+                  </div>
+                ) : null}
 
-                  {saleLines.map((line) => (
-                    <div key={line.id} className="grid gap-2 md:grid-cols-[1fr_180px_auto]">
-                      <ProductCombobox
-                        products={products}
-                        value={line.productId}
-                        onChange={(productId) => updateSaleLine(line.id, { productId })}
-                        isDarkTheme={isDarkTheme}
-                      />
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Vendas hoje</p>
+                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{formatCurrency(salesTodayTotal)}</p>
+                  </article>
+                  <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Vendas no mês</p>
+                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{formatCurrency(salesMonthlyTotal)}</p>
+                  </article>
+                  <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Ticket médio</p>
+                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{formatCurrency(Number(salesAnalysis?.averageTicket || 0))}</p>
+                  </article>
+                  <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Produto destaque</p>
+                    <p className={['mt-1 truncate text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{bestSellingProductLabel}</p>
+                  </article>
+                </div>
 
-                      <input
+                <div className="mt-5 grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
+                  <section className={['rounded-2xl p-4', isDarkTheme ? 'border border-white/10 bg-black/20' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Seleção de produtos</h3>
+                      <motion.button
+                        type="button"
+                        whileHover={{ y: -2 }}
+                        whileTap={{ scale: 0.96 }}
+                        onClick={addSaleLine}
+                        className={isDarkTheme ? 'rounded-xl border border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/25' : 'rounded-xl border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100'}
+                      >
+                        + Adicionar item
+                      </motion.button>
+                    </div>
+
+                    <div className="grid gap-3">
+                      {saleLines.map((line) => (
+                        <motion.div
+                          key={line.id}
+                          layout
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="grid gap-2 md:grid-cols-[1fr_190px_auto]"
+                        >
+                          <ProductCombobox
+                            products={products}
+                            value={line.productId}
+                            onChange={(productId) => updateSaleLine(line.id, { productId })}
+                            isDarkTheme={isDarkTheme}
+                          />
+
+                          <div className={['flex items-center gap-2 rounded-xl px-2', isDarkTheme ? 'border border-white/10 bg-white/5' : 'border border-slate-200 bg-white'].join(' ')}>
+                            <button
+                              type="button"
+                              onClick={() => stepSaleLineQuantity(line.id, -1)}
+                              className={isDarkTheme ? 'rounded-lg px-2 py-1 text-slate-200 hover:bg-white/10' : 'rounded-lg px-2 py-1 text-slate-700 hover:bg-slate-100'}
+                            >
+                              -
+                            </button>
+                            <input
+                              className={[
+                                'w-full bg-transparent px-2 py-2 text-center text-sm outline-none',
+                                isDarkTheme ? 'text-slate-100' : 'text-slate-800'
+                              ].join(' ')}
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={line.quantity}
+                              onChange={(event) => updateSaleLineQuantityFromInput(line.id, event.target.value)}
+                              onBlur={() => normalizeSaleLineQuantity(line.id, line.quantity)}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => stepSaleLineQuantity(line.id, 1)}
+                              className={isDarkTheme ? 'rounded-lg px-2 py-1 text-slate-200 hover:bg-white/10' : 'rounded-lg px-2 py-1 text-slate-700 hover:bg-slate-100'}
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => removeSaleLine(line.id)}
+                            className={[
+                              'rounded-xl px-3 py-2 text-sm font-semibold transition-all duration-300 hover:-translate-y-0.5',
+                              isDarkTheme
+                                ? 'border border-white/15 text-slate-200 hover:bg-white/10'
+                                : 'border border-slate-300 text-slate-700 hover:bg-slate-100'
+                            ].join(' ')}
+                          >
+                            Remover
+                          </button>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className={['rounded-2xl p-4', isDarkTheme ? 'border border-cyan-400/25 bg-gradient-to-b from-slate-900/80 to-slate-950/80' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Carrinho</h3>
+
+                    <div className="mt-3 space-y-2">
+                      <AnimatePresence initial={false}>
+                        {salesCartItems.map((item) => (
+                          <motion.article
+                            key={item.lineId}
+                            layout
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -8 }}
+                            className={['rounded-xl border px-3 py-2 text-sm', isDarkTheme ? 'border-white/10 bg-black/20 text-slate-100' : 'border-slate-200 bg-white text-slate-700'].join(' ')}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="truncate font-semibold">{item.product?.name}</p>
+                              <p className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{formatCurrency(item.lineTotal)}</p>
+                            </div>
+                            <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                              Qtd: {item.quantity} • Unitário: {formatCurrency(item.price)}
+                            </p>
+                          </motion.article>
+                        ))}
+                      </AnimatePresence>
+
+                      {!salesCartItems.length ? (
+                        <p className={['rounded-xl border border-dashed px-3 py-4 text-center text-xs', isDarkTheme ? 'border-white/10 text-slate-400' : 'border-slate-300 text-slate-500'].join(' ')}>
+                          Nenhum item adicionado ao carrinho.
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className={['mt-3 rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-cyan-500/10' : 'border border-cyan-200 bg-cyan-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-cyan-200/80' : 'text-cyan-700'].join(' ')}>Total em tempo real</p>
+                      <p className={['mt-1 text-2xl font-black', isDarkTheme ? 'text-cyan-100' : 'text-cyan-800'].join(' ')}>{formatCurrency(salesCartTotal)}</p>
+                    </div>
+
+                    <div className="mt-3 grid gap-2">
+                      <select
+                        value={saleCustomerId}
+                        onChange={(event) => setSaleCustomerId(event.target.value)}
                         className={[
-                          'rounded-xl px-3 py-2 text-sm outline-none transition-all focus:border-blue-400',
+                          'rounded-xl px-3 py-2 text-sm outline-none',
                           isDarkTheme
-                            ? 'border border-white/10 bg-white/5 text-slate-100 focus:ring-2 focus:ring-cyan-500/40'
-                            : 'border border-slate-200 bg-slate-50'
+                            ? 'border border-white/10 bg-white/5 text-slate-100'
+                            : 'border border-slate-200 bg-white text-slate-700'
                         ].join(' ')}
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={line.quantity}
-                        onChange={(event) => updateSaleLineQuantityFromInput(line.id, event.target.value)}
-                        onBlur={() => normalizeSaleLineQuantity(line.id, line.quantity)}
-                      />
+                      >
+                        <option value="quick-sale">Venda rápida (sem cliente)</option>
+                        {salesCustomerOptions.map((customer) => (
+                          <option key={customer.id} value={customer.id}>{customer.name}</option>
+                        ))}
+                      </select>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          { key: 'cash' as const, label: 'Dinheiro' },
+                          { key: 'pix' as const, label: 'Pix' },
+                          { key: 'card' as const, label: 'Cartão' }
+                        ]).map((method) => (
+                          <button
+                            key={method.key}
+                            type="button"
+                            onClick={() => setSalePaymentMethod(method.key)}
+                            className={[
+                              'rounded-xl border px-2 py-2 text-xs font-semibold transition-all',
+                              salePaymentMethod === method.key
+                                ? isDarkTheme
+                                  ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200'
+                                  : 'border-blue-300 bg-blue-50 text-blue-700'
+                                : isDarkTheme
+                                  ? 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            ].join(' ')}
+                          >
+                            {method.label}
+                          </button>
+                        ))}
+                      </div>
 
                       <button
                         type="button"
-                        onClick={() => removeSaleLine(line.id)}
-                        className={[
-                          'rounded-xl px-3 py-2 text-sm font-semibold transition-all duration-300 hover:-translate-y-0.5',
-                          isDarkTheme
-                            ? 'border border-white/15 text-slate-200 hover:bg-white/10'
-                            : 'border border-slate-300 text-slate-700 hover:bg-slate-100'
-                        ].join(' ')}
+                        onClick={checkoutSale}
+                        disabled={salesLoading || !salesCartItems.length}
+                        className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-70"
                       >
-                        Remover
+                        {salesLoading ? 'Finalizando...' : 'Finalizar venda'}
                       </button>
                     </div>
-                  ))}
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={addSaleLine}
-                      className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-100"
-                    >
-                      Adicionar item
-                    </button>
-                    <button
-                      type="button"
-                      onClick={checkoutSale}
-                      disabled={salesLoading}
-                      className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-70"
-                    >
-                      Finalizar venda
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void fetchSalesAnalysis();
-                      }}
-                      disabled={salesLoading}
-                      className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-100 disabled:opacity-70"
-                    >
-                      Atualizar analise
-                    </button>
-                  </div>
+                  </section>
                 </div>
+
+                <section className={['mt-5 rounded-2xl p-4', isDarkTheme ? 'border border-white/10 bg-black/20' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Histórico de vendas</h3>
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        value={saleHistorySearch}
+                        onChange={(event) => setSaleHistorySearch(event.target.value)}
+                        placeholder="Buscar cliente, ID ou valor"
+                        className={[
+                          'rounded-xl px-3 py-2 text-sm outline-none',
+                          isDarkTheme
+                            ? 'border border-white/10 bg-white/5 text-slate-100 placeholder-slate-500'
+                            : 'border border-slate-200 bg-white text-slate-700 placeholder-slate-400'
+                        ].join(' ')}
+                      />
+                      <select
+                        value={saleHistoryStatusFilter}
+                        onChange={(event) => setSaleHistoryStatusFilter(event.target.value as 'ALL' | 'CONCLUIDA')}
+                        className={[
+                          'rounded-xl px-3 py-2 text-sm outline-none',
+                          isDarkTheme
+                            ? 'border border-white/10 bg-white/5 text-slate-100'
+                            : 'border border-slate-200 bg-white text-slate-700'
+                        ].join(' ')}
+                      >
+                        <option value="ALL">Todos os status</option>
+                        <option value="CONCLUIDA">Concluída</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void fetchSalesAnalysis()}
+                        disabled={salesLoading}
+                        className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60' : 'rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60'}
+                      >
+                        Atualizar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[620px] text-sm">
+                      <thead>
+                        <tr className={isDarkTheme ? 'text-slate-300' : 'text-slate-600'}>
+                          <th className="px-3 py-2 text-left">Cliente</th>
+                          <th className="px-3 py-2 text-left">Valor total</th>
+                          <th className="px-3 py-2 text-left">Data</th>
+                          <th className="px-3 py-2 text-left">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredSalesHistoryRows.map((sale) => (
+                          <tr key={sale.id} className={isDarkTheme ? 'border-t border-white/10' : 'border-t border-slate-200'}>
+                            <td className="px-3 py-3">{sale.customer}</td>
+                            <td className="px-3 py-3 font-semibold">{formatCurrency(sale.total)}</td>
+                            <td className="px-3 py-3">{formatDateTime(sale.createdAt)}</td>
+                            <td className="px-3 py-3">
+                              <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-300">{sale.status}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    {!filteredSalesHistoryRows.length ? (
+                      <p className={['px-3 py-5 text-center text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                        Nenhuma venda encontrada com os filtros atuais.
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
               </div>
 
               <div className={[
