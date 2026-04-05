@@ -30,11 +30,5 @@ export const getWhatsAppApiConfig = () => ({
   phoneNumberId: String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim()
 });
 
-export const getInstagramApiConfig = () => ({
-  apiVersion: String(process.env.INSTAGRAM_API_VERSION || 'v20.0').trim(),
-  accessToken: String(process.env.INSTAGRAM_ACCESS_TOKEN || '').trim(),
-  businessAccountId: String(process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '').trim()
-});
-
 export const getIntegrationWebhookSecret = () =>
   String(process.env.INTEGRATION_WEBHOOK_SECRET || '').trim();

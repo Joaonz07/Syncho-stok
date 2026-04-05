@@ -23,7 +23,7 @@ type SupportChatMessage = {
   createdAt: string;
 };
 
-type IntegrationProvider = 'WHATSAPP' | 'INSTAGRAM';
+type IntegrationProvider = 'WHATSAPP';
 
 type IntegrationChatMessage = {
   id: string;
@@ -291,7 +291,7 @@ export const initSocketGateway = (httpServer: HttpServer) => {
         return;
       }
 
-      if (!['WHATSAPP', 'INSTAGRAM'].includes(providerRaw)) {
+      if (providerRaw !== 'WHATSAPP') {
         socket.emit('integration:error', { message: 'Provider invalido para chat de integracao.' });
         return;
       }

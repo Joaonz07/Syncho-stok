@@ -45,7 +45,7 @@ const leadPriorities = ['BAIXA', 'MEDIA', 'ALTA'] as const;
 const supportStatuses = ['PENDING', 'IN_REVIEW', 'DONE'] as const;
 type LeadStatus = (typeof leadStatuses)[number];
 type SupportStatus = (typeof supportStatuses)[number];
-type IntegrationProvider = 'WHATSAPP' | 'INSTAGRAM';
+type IntegrationProvider = 'WHATSAPP';
 type SupportChatMessage = {
   id: string;
   companyId: string;
@@ -224,7 +224,7 @@ const mapSupportChatMessages = async (
   });
 };
 
-const integrationProviders = ['WHATSAPP', 'INSTAGRAM'] as const;
+const integrationProviders = ['WHATSAPP'] as const;
 const integrationProviderFields = ['provider', 'channel'];
 const integrationConversationAliases = ['conversation_id', 'conversationId'];
 const integrationUserAliases = ['user_id', 'userId'];
@@ -585,85 +585,52 @@ const parseMetaWebhookMessages = async (
     ? (body.entry as Array<Record<string, unknown>>)
     : [];
 
-  if (provider === 'WHATSAPP') {
-    for (const entry of entries) {
-      const changes = Array.isArray(entry.changes)
-        ? (entry.changes as Array<Record<string, unknown>>)
-        : [];
-
-      for (const change of changes) {
-        const value = (change.value || {}) as Record<string, unknown>;
-        const metadata = (value.metadata || {}) as Record<string, unknown>;
-        const phoneNumberId = String(metadata.phone_number_id || value.phone_number_id || '').trim();
-        const companyId = await findCompanyIdByIntegrationAccount('WHATSAPP', phoneNumberId);
-
-        if (!companyId) {
-          continue;
-        }
-
-        const contacts = Array.isArray(value.contacts)
-          ? (value.contacts as Array<Record<string, unknown>>)
-          : [];
-        const messages = Array.isArray(value.messages)
-          ? (value.messages as Array<Record<string, unknown>>)
-          : [];
-        const defaultName = String(
-          (contacts[0]?.profile as Record<string, unknown> | undefined)?.name || contacts[0]?.wa_id || 'Contato'
-        ).trim();
-
-        for (const message of messages) {
-          const from = String(message.from || '').trim();
-          const content = extractWebhookMessageText(message);
-
-          if (!from || !content) {
-            continue;
-          }
-
-          parsedMessages.push({
-            provider: 'WHATSAPP',
-            companyId,
-            conversationId: from,
-            userId: from,
-            userName: defaultName || from,
-            content
-          });
-        }
-      }
-    }
-
+  if (provider !== 'WHATSAPP') {
     return parsedMessages;
   }
 
   for (const entry of entries) {
-    const businessAccountId = String(entry.id || '').trim();
-    const companyId = await findCompanyIdByIntegrationAccount('INSTAGRAM', businessAccountId);
-
-    if (!companyId) {
-      continue;
-    }
-
-    const messaging = Array.isArray(entry.messaging)
-      ? (entry.messaging as Array<Record<string, unknown>>)
+    const changes = Array.isArray(entry.changes)
+      ? (entry.changes as Array<Record<string, unknown>>)
       : [];
 
-    for (const event of messaging) {
-      const sender = (event.sender || {}) as Record<string, unknown>;
-      const message = (event.message || {}) as Record<string, unknown>;
-      const from = String(sender.id || '').trim();
-      const content = extractWebhookMessageText(message);
+    for (const change of changes) {
+      const value = (change.value || {}) as Record<string, unknown>;
+      const metadata = (value.metadata || {}) as Record<string, unknown>;
+      const phoneNumberId = String(metadata.phone_number_id || value.phone_number_id || '').trim();
+      const companyId = await findCompanyIdByIntegrationAccount('WHATSAPP', phoneNumberId);
 
-      if (!from || !content) {
+      if (!companyId) {
         continue;
       }
 
-      parsedMessages.push({
-        provider: 'INSTAGRAM',
-        companyId,
-        conversationId: from,
-        userId: from,
-        userName: String(sender.username || sender.name || from).trim() || from,
-        content
-      });
+      const contacts = Array.isArray(value.contacts)
+        ? (value.contacts as Array<Record<string, unknown>>)
+        : [];
+      const messages = Array.isArray(value.messages)
+        ? (value.messages as Array<Record<string, unknown>>)
+        : [];
+      const defaultName = String(
+        (contacts[0]?.profile as Record<string, unknown> | undefined)?.name || contacts[0]?.wa_id || 'Contato'
+      ).trim();
+
+      for (const message of messages) {
+        const from = String(message.from || '').trim();
+        const content = extractWebhookMessageText(message);
+
+        if (!from || !content) {
+          continue;
+        }
+
+        parsedMessages.push({
+          provider: 'WHATSAPP',
+          companyId,
+          conversationId: from,
+          userId: from,
+          userName: defaultName || from,
+          content
+        });
+      }
     }
   }
 
@@ -2172,16 +2139,12 @@ router.get('/integrations/status', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'companyId e obrigatorio para consultar integracoes.' });
   }
 
-  const [whatsapp, instagram] = await Promise.all([
-    getIntegrationStatusWithAliases(companyId, 'WHATSAPP'),
-    getIntegrationStatusWithAliases(companyId, 'INSTAGRAM')
-  ]);
+  const whatsapp = await getIntegrationStatusWithAliases(companyId, 'WHATSAPP');
 
   return res.status(200).json({
     companyId,
     integrations: {
-      whatsapp,
-      instagram
+      whatsapp
     }
   });
 });
@@ -2198,7 +2161,7 @@ router.post('/integrations/connect/:provider', requireAuth, async (req, res) => 
   const connected = Boolean(req.body?.connected ?? true);
 
   if (!provider) {
-    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP ou INSTAGRAM.' });
+    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP.' });
   }
 
   if (!companyId) {
@@ -2226,43 +2189,6 @@ router.post('/integrations/connect/:provider', requireAuth, async (req, res) => 
   });
 });
 
-router.post('/integrations/oauth/instagram', requireAuth, async (req, res) => {
-  if (!req.authUser) {
-    return res.status(401).json({ message: 'Usuario nao autenticado.' });
-  }
-
-  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
-  const authCode = String(req.body?.code || '').trim();
-  const customAccountId = String(req.body?.accountId || '').trim() || null;
-
-  if (!companyId) {
-    return res.status(400).json({ message: 'companyId e obrigatorio para OAuth do Instagram.' });
-  }
-
-  if (!authCode) {
-    return res.status(400).json({ message: 'Codigo OAuth do Instagram e obrigatorio.' });
-  }
-
-  const generatedToken = `ig_${Buffer.from(`${companyId}:${authCode}:${Date.now()}`).toString('base64').slice(0, 28)}`;
-  const accountId = customAccountId || `ig-account-${companyId.slice(0, 8)}`;
-
-  const payload: IntegrationConnection = {
-    provider: 'INSTAGRAM',
-    companyId,
-    connected: true,
-    token: generatedToken,
-    accountId,
-    updatedAt: new Date().toISOString()
-  };
-
-  await saveIntegrationStatusWithAliases(payload);
-
-  return res.status(200).json({
-    message: 'Instagram conectado via OAuth com sucesso.',
-    integration: payload
-  });
-});
-
 router.get('/integrations/conversations', requireAuth, async (req, res) => {
   if (!req.authUser) {
     return res.status(401).json({ message: 'Usuario nao autenticado.' });
@@ -2272,7 +2198,7 @@ router.get('/integrations/conversations', requireAuth, async (req, res) => {
   const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
 
   if (!provider) {
-    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP ou INSTAGRAM.' });
+    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP.' });
   }
 
   if (!companyId) {
@@ -2298,7 +2224,7 @@ router.get('/integrations/messages', requireAuth, async (req, res) => {
   const conversationId = String(req.query.conversationId || '').trim() || null;
 
   if (!provider) {
-    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP ou INSTAGRAM.' });
+    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP.' });
   }
 
   if (!companyId) {
@@ -2332,7 +2258,7 @@ router.post('/integrations/messages/send', requireAuth, async (req, res) => {
   const content = String(req.body?.content || '').trim();
 
   if (!provider) {
-    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP ou INSTAGRAM.' });
+    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP.' });
   }
 
   if (!companyId) {

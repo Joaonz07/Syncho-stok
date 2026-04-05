@@ -1,10 +1,10 @@
--- Tabelas para integracoes WhatsApp/Instagram
+-- Tabelas para integracoes WhatsApp
 -- Execute no banco (Supabase SQL editor) se desejar persistencia completa.
 
 create table if not exists integrations (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null,
-  provider text not null check (provider in ('WHATSAPP', 'INSTAGRAM')),
+  provider text not null check (provider in ('WHATSAPP')),
   connected boolean not null default false,
   token text,
   account_id text,
@@ -16,7 +16,7 @@ create table if not exists integrations (
 create table if not exists integration_messages (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null,
-  provider text not null check (provider in ('WHATSAPP', 'INSTAGRAM')),
+  provider text not null check (provider in ('WHATSAPP')),
   conversation_id text not null,
   user_id text not null,
   user_name text,

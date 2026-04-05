@@ -1,4 +1,4 @@
-import { getInstagramApiConfig, getWhatsAppApiConfig } from '../config/runtime';
+import { getWhatsAppApiConfig } from '../config/runtime';
 
 type SendOptions = {
   accessToken?: string | null;
@@ -74,62 +74,15 @@ export const sendWhatsAppMessage = async (
   return body;
 };
 
-export const sendInstagramMessage = async (
-  recipientId: string,
-  text: string,
-  options?: SendOptions
-) => {
-  const defaultConfig = getInstagramApiConfig();
-  const accessToken = String(options?.accessToken || defaultConfig.accessToken || '').trim();
-  const businessAccountId = String(options?.accountId || defaultConfig.businessAccountId || '').trim();
-  const apiVersion = String(defaultConfig.apiVersion || 'v20.0').trim();
-
-  if (!accessToken) {
-    throw new Error('Token do Instagram nao configurado.');
-  }
-
-  if (!businessAccountId) {
-    throw new Error('Business Account ID do Instagram nao configurado.');
-  }
-
-  const endpoint = `https://graph.facebook.com/${apiVersion}/${encodeURIComponent(businessAccountId)}/messages`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      recipient: { id: recipientId },
-      message: { text }
-    })
-  });
-
-  const body = await parseResponseBody(response);
-
-  if (!response.ok) {
-    throw new Error(getApiErrorMessage(body, 'Falha ao enviar mensagem via Instagram Graph API.'));
-  }
-
-  return body;
-};
-
 export const sendMessageByProvider = async (params: {
-  provider: 'WHATSAPP' | 'INSTAGRAM';
+  provider: 'WHATSAPP';
   recipientId: string;
   content: string;
   accessToken?: string | null;
   accountId?: string | null;
 }) => {
   try {
-    if (params.provider === 'WHATSAPP') {
-      return await sendWhatsAppMessage(params.recipientId, params.content, {
-        accessToken: params.accessToken,
-        accountId: params.accountId
-      });
-    }
-
-    return await sendInstagramMessage(params.recipientId, params.content, {
+    return await sendWhatsAppMessage(params.recipientId, params.content, {
       accessToken: params.accessToken,
       accountId: params.accountId
     });

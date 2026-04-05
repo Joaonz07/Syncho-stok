@@ -202,7 +202,7 @@ type SupportChatMessage = {
   createdAt: string;
 };
 
-type IntegrationProvider = 'WHATSAPP' | 'INSTAGRAM';
+type IntegrationProvider = 'WHATSAPP';
 
 type IntegrationConnection = {
   provider: IntegrationProvider;
@@ -761,22 +761,17 @@ const Dashboard = () => {
   const [supportAdminOnline, setSupportAdminOnline] = useState(false);
   const [supportTypingText, setSupportTypingText] = useState('');
   const [supportUnreadCount, setSupportUnreadCount] = useState(0);
-  const [integrationProvider, setIntegrationProvider] = useState<IntegrationProvider>('WHATSAPP');
   const [integrationsCompanyId, setIntegrationsCompanyId] = useState('');
   const [integrationLoading, setIntegrationLoading] = useState(false);
   const [whatsappTokenInput, setWhatsappTokenInput] = useState('');
   const [whatsappAccountIdInput, setWhatsappAccountIdInput] = useState('');
-  const [instagramOAuthCode, setInstagramOAuthCode] = useState('');
-  const [instagramAccountIdInput, setInstagramAccountIdInput] = useState('');
   const [integrationConnections, setIntegrationConnections] = useState<{
     whatsapp: IntegrationConnection | null;
-    instagram: IntegrationConnection | null;
-  }>({ whatsapp: null, instagram: null });
+  }>({ whatsapp: null });
   const [integrationConversations, setIntegrationConversations] = useState<IntegrationConversation[]>([]);
   const [selectedIntegrationConversationId, setSelectedIntegrationConversationId] = useState<string | null>(null);
   const [integrationMessages, setIntegrationMessages] = useState<IntegrationMessage[]>([]);
   const [integrationReply, setIntegrationReply] = useState('');
-  const integrationProviderRef = useRef<IntegrationProvider>('WHATSAPP');
   const [adminSection, setAdminSection] = useState<'overview' | 'companies' | 'users' | 'plans' | 'support'>('overview');
   const [planCatalog, setPlanCatalog] = useState<AdminPlanConfig[]>(() => {
     if (typeof window === 'undefined') {
@@ -2172,8 +2167,7 @@ const Dashboard = () => {
       }
 
       setIntegrationConnections({
-        whatsapp: (result.integrations?.whatsapp || null) as IntegrationConnection | null,
-        instagram: (result.integrations?.instagram || null) as IntegrationConnection | null
+        whatsapp: (result.integrations?.whatsapp || null) as IntegrationConnection | null
       });
     } catch (_error) {
       setStatus('Erro de rede ao carregar status de integracoes.');
@@ -2231,53 +2225,12 @@ const Dashboard = () => {
     }
   };
 
-  const connectInstagramOAuth = async () => {
-    if (!token) {
+  const openWhatsAppWeb = () => {
+    if (typeof window === 'undefined') {
       return;
     }
 
-    const targetCompanyId = getIntegrationsTargetCompanyId();
-    const code = instagramOAuthCode.trim();
-    const accountId = instagramAccountIdInput.trim() || null;
-
-    if (!targetCompanyId) {
-      setStatus('Selecione uma empresa para conectar Instagram.');
-      return;
-    }
-
-    if (!code) {
-      setStatus('Informe o codigo OAuth do Instagram/Meta.');
-      return;
-    }
-
-    setIntegrationLoading(true);
-
-    try {
-      const response = await fetch('/api/dashboard/integrations/oauth/instagram', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ companyId: targetCompanyId, code, accountId })
-      });
-      const result = await response.json();
-
-      if (!response.ok) {
-        setStatus(result.message || 'Falha ao conectar Instagram.');
-        return;
-      }
-
-      setInstagramOAuthCode('');
-      setInstagramAccountIdInput('');
-      setStatus('Instagram conectado com sucesso.');
-      showToast('Instagram conectado');
-      await fetchIntegrationStatus();
-    } catch (_error) {
-      setStatus('Erro de rede ao conectar Instagram.');
-    } finally {
-      setIntegrationLoading(false);
-    }
+    window.open('https://web.whatsapp.com/', '_blank', 'noopener,noreferrer');
   };
 
   const disconnectIntegration = async (provider: IntegrationProvider) => {
@@ -2334,9 +2287,9 @@ const Dashboard = () => {
 
     try {
       const response = await fetch(
-        `/api/dashboard/integrations/conversations?companyId=${encodeURIComponent(targetCompanyId)}&provider=${integrationProvider}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+        `/api/dashboard/integrations/conversations?companyId=${encodeURIComponent(targetCompanyId)}&provider=WHATSAPP`,
+        { headers: { Authorization: `Bearer ${token}` }
+      });
       const result = await response.json();
 
       if (!response.ok) {
@@ -2365,7 +2318,7 @@ const Dashboard = () => {
 
     try {
       const response = await fetch(
-        `/api/dashboard/integrations/messages?companyId=${encodeURIComponent(targetCompanyId)}&provider=${integrationProvider}&conversationId=${encodeURIComponent(conversationId)}`,
+        `/api/dashboard/integrations/messages?companyId=${encodeURIComponent(targetCompanyId)}&provider=WHATSAPP&conversationId=${encodeURIComponent(conversationId)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const result = await response.json();
@@ -2405,7 +2358,7 @@ const Dashboard = () => {
         },
         body: JSON.stringify({
           companyId: targetCompanyId,
-          provider: integrationProvider,
+          provider: 'WHATSAPP',
           conversationId: conversation.id,
           userId: conversation.userId,
           userName: conversation.userName,
@@ -2557,7 +2510,7 @@ const Dashboard = () => {
         void fetchIntegrationMessages(selectedIntegrationConversationId);
       }
     }
-  }, [activeView, token, integrationProvider, integrationsCompanyId, selectedIntegrationConversationId]);
+  }, [activeView, token, integrationsCompanyId, selectedIntegrationConversationId]);
 
   useEffect(() => {
     if (activeView === 'chat') {
@@ -2576,10 +2529,6 @@ const Dashboard = () => {
       void fetchSupportRequests();
     }
   }, [activeView, role, token]);
-
-  useEffect(() => {
-    integrationProviderRef.current = integrationProvider;
-  }, [integrationProvider]);
 
   useEffect(() => {
     if (!token) {
@@ -2662,7 +2611,7 @@ const Dashboard = () => {
     });
 
     socket.on('integration:new-message', (incoming: IntegrationMessage) => {
-      if (incoming.provider !== integrationProviderRef.current) {
+      if (incoming.provider !== 'WHATSAPP') {
         return;
       }
 
@@ -2728,9 +2677,9 @@ const Dashboard = () => {
 
     supportSocketRef.current.emit('integration:join', {
       companyId: targetCompanyId,
-      provider: integrationProvider
+      provider: 'WHATSAPP'
     });
-  }, [activeView, integrationProvider, integrationsCompanyId, settingsCompanyId]);
+  }, [activeView, integrationsCompanyId, settingsCompanyId]);
 
   useEffect(() => {
     if (activeView === 'sales') {
@@ -5242,7 +5191,7 @@ const Dashboard = () => {
               ].join(' ')}>
                 <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Integracoes</h1>
                 <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                  Conecte WhatsApp e Instagram para centralizar mensagens em tempo real.
+                  Conecte seu canal WhatsApp e acesse rapidamente o WhatsApp Web para atendimento.
                 </p>
 
                 {role === 'ADMIN' ? (
@@ -5261,7 +5210,7 @@ const Dashboard = () => {
                 ) : null}
               </div>
 
-              <div className="grid gap-4 xl:grid-cols-2">
+              <div className="grid gap-4 xl:grid-cols-1">
                 <motion.div
                   whileHover={{ y: -3 }}
                   className={[
@@ -5271,7 +5220,7 @@ const Dashboard = () => {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h2 className={['text-base font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>WhatsApp Integration</h2>
+                      <h2 className={['text-base font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>WhatsApp</h2>
                       <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
                         Token/API key para envio e resposta de mensagens.
                       </p>
@@ -5315,70 +5264,14 @@ const Dashboard = () => {
                       </button>
                       <button
                         type="button"
+                        onClick={openWhatsAppWeb}
+                        className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500"
+                      >
+                        Abrir WhatsApp Web
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => void disconnectIntegration('WHATSAPP')}
-                        disabled={integrationLoading}
-                        className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-70' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-70'}
-                      >
-                        Desconectar
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-
-                <motion.div
-                  whileHover={{ y: -3 }}
-                  className={[
-                    'rounded-2xl border p-5',
-                    isDarkTheme ? 'border-purple-500/20 bg-[#0d1117] shadow-[0_0_18px_rgba(168,85,247,0.14)]' : 'border-slate-200 bg-white'
-                  ].join(' ')}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h2 className={['text-base font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Instagram Integration (Meta OAuth)</h2>
-                      <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                        Conecte via OAuth para leitura e resposta de mensagens.
-                      </p>
-                    </div>
-                    <span className={[
-                      'rounded-full px-2 py-0.5 text-xs font-semibold',
-                      integrationConnections.instagram?.connected
-                        ? 'bg-emerald-500/15 text-emerald-300'
-                        : 'bg-rose-500/15 text-rose-300'
-                    ].join(' ')}>
-                      {integrationConnections.instagram?.connected ? 'Connected' : 'Not connected'}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 grid gap-3">
-                    <input
-                      className={themedInputClass}
-                      placeholder="Cole o code OAuth do Instagram"
-                      value={instagramOAuthCode}
-                      onChange={(event) => setInstagramOAuthCode(event.target.value)}
-                    />
-                    <input
-                      className={themedInputClass}
-                      placeholder="Instagram Business Account ID (opcional)"
-                      value={instagramAccountIdInput}
-                      onChange={(event) => setInstagramAccountIdInput(event.target.value)}
-                    />
-                    {integrationConnections.instagram?.accountId ? (
-                      <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                        Conta conectada: {integrationConnections.instagram.accountId}
-                      </p>
-                    ) : null}
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={connectInstagramOAuth}
-                        disabled={integrationLoading}
-                        className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-purple-500 disabled:opacity-70"
-                      >
-                        Connect Instagram (Meta OAuth)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void disconnectIntegration('INSTAGRAM')}
                         disabled={integrationLoading}
                         className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-70' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-70'}
                       >
@@ -5397,29 +5290,16 @@ const Dashboard = () => {
                   <div>
                     <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Chat de Integracoes</h3>
                     <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                      Conversas agrupadas por usuario com resposta em tempo real.
+                      Conversas do WhatsApp agrupadas por usuario com resposta em tempo real.
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    {(['WHATSAPP', 'INSTAGRAM'] as IntegrationProvider[]).map((provider) => (
-                      <button
-                        key={provider}
-                        type="button"
-                        onClick={() => {
-                          setIntegrationProvider(provider);
-                          setSelectedIntegrationConversationId(null);
-                          setIntegrationMessages([]);
-                        }}
-                        className={[
-                          'rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all',
-                          integrationProvider === provider
-                            ? isDarkTheme ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-300' : 'border-blue-300 bg-blue-50 text-blue-700'
-                            : isDarkTheme ? 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        ].join(' ')}
-                      >
-                        {provider === 'WHATSAPP' ? 'WhatsApp' : 'Instagram'}
-                      </button>
-                    ))}
+                    <span className={[
+                      'rounded-xl border px-3 py-1.5 text-xs font-semibold',
+                      isDarkTheme ? 'border-cyan-400/40 bg-cyan-500/15 text-cyan-300' : 'border-blue-300 bg-blue-50 text-blue-700'
+                    ].join(' ')}>
+                      Canal: WhatsApp
+                    </span>
                     <button
                       type="button"
                       onClick={() => {
