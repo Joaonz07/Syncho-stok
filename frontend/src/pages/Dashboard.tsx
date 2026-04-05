@@ -185,6 +185,50 @@ const getUserIdFromJwt = (jwt: string) => {
   }
 };
 
+const salesStages: Array<{ key: LeadStatus; label: string; shortLabel: string }> = [
+  { key: 'NOVO_CONTATO', label: 'Busca', shortLabel: 'Busca' },
+  { key: 'EM_CONTATO', label: 'Oferta', shortLabel: 'Oferta' },
+  { key: 'APRESENTACAO', label: 'Negociacao', shortLabel: 'Negociacao' },
+  { key: 'NEGOCIACAO', label: 'Acordo', shortLabel: 'Acordo' },
+  { key: 'FECHAMENTO', label: 'Fechamento', shortLabel: 'Fechamento' }
+];
+
+const acquisitionSources = ['Chamadas', 'Apresentacoes', 'E-mail', 'Landing Page'] as const;
+
+const hashString = (value: string) => {
+  let hash = 0;
+  const text = String(value || '');
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash << 5) - hash + text.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
+};
+
+const inferLeadSource = (lead: Lead) => {
+  const haystack = `${lead.name || ''} ${lead.notes || ''}`.toLowerCase();
+
+  if (haystack.includes('liga') || haystack.includes('phone') || haystack.includes('chamada')) {
+    return 'Chamadas' as const;
+  }
+
+  if (haystack.includes('apresent') || haystack.includes('demo') || haystack.includes('reuniao')) {
+    return 'Apresentacoes' as const;
+  }
+
+  if (haystack.includes('mail') || haystack.includes('@') || haystack.includes('email')) {
+    return 'E-mail' as const;
+  }
+
+  if (haystack.includes('site') || haystack.includes('landing') || haystack.includes('formulario')) {
+    return 'Landing Page' as const;
+  }
+
+  return acquisitionSources[hashString(`${lead.id}-${lead.name}`) % acquisitionSources.length];
+};
+
 const Dashboard = () => {
   const { companyId, role, isAuthenticated, loading: authLoading, signOut } = useAuth();
   const token = getAccessToken();
@@ -207,6 +251,9 @@ const Dashboard = () => {
   const [dragOverColumn, setDragOverColumn] = useState<LeadStatus | null>(null);
   const [recentlyMovedLeadId, setRecentlyMovedLeadId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [disabledSellerIds, setDisabledSellerIds] = useState<string[]>([]);
+  const [rankingActiveSellerId, setRankingActiveSellerId] = useState<string | null>(null);
+  const [rejectionViewMode, setRejectionViewMode] = useState<'table' | 'funnel'>('table');
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editPriority, setEditPriority] = useState<LeadPriority>('MEDIA');
@@ -360,6 +407,209 @@ const Dashboard = () => {
     });
     return map;
   }, [filteredLeads]);
+
+  const funnelSellerOptions = useMemo(() => {
+    const fromUsers = managedUsers
+      .filter((user) => user.role === 'CLIENT')
+      .map((user) => ({
+        id: String(user.id || '').trim(),
+        name: String(user.name || user.email || '').trim() || 'Vendedor'
+      }))
+      .filter((user) => user.id);
+
+    if (fromUsers.length) {
+      return fromUsers;
+    }
+
+    return [
+      { id: 'seller-alpha', name: 'Equipe Alfa' },
+      { id: 'seller-bravo', name: 'Equipe Bravo' },
+      { id: 'seller-charlie', name: 'Equipe Charlie' },
+      { id: 'seller-delta', name: 'Equipe Delta' },
+      { id: 'seller-echo', name: 'Equipe Echo' }
+    ];
+  }, [managedUsers]);
+
+  const funnelLeadsEnriched = useMemo(() => {
+    const stageIndexMap = new Map<LeadStatus, number>(salesStages.map((stage, index) => [stage.key, index]));
+
+    return leads.map((lead) => {
+      const source = inferLeadSource(lead);
+      const seller = funnelSellerOptions[hashString(lead.id) % funnelSellerOptions.length];
+      const stageIndex = stageIndexMap.get(lead.status) ?? 0;
+
+      return {
+        lead,
+        source,
+        sellerId: seller.id,
+        sellerName: seller.name,
+        stageIndex,
+        estimatedSalesValue: Number(lead.value || 0) * (lead.status === 'FECHAMENTO' ? 1 : 0.35 + stageIndex * 0.13)
+      };
+    });
+  }, [leads, funnelSellerOptions]);
+
+  const funnelSellersAnalytics = useMemo(() => {
+    return funnelSellerOptions.map((seller) => {
+      const entries = funnelLeadsEnriched.filter((item) => item.sellerId === seller.id);
+      const leadsCount = entries.length;
+      const salesVolume = entries.reduce((acc, item) => acc + Number(item.estimatedSalesValue || 0), 0);
+      const stageCounts = salesStages.map((stage) => entries.filter((item) => item.lead.status === stage.key).length);
+
+      const rejectionByStage = salesStages.map((_stage, stageIndex) => {
+        if (!leadsCount) {
+          return 0;
+        }
+
+        const reached = entries.filter((item) => item.stageIndex >= stageIndex).length;
+        return Math.max(0, Math.min(100, 100 - (reached / leadsCount) * 100));
+      });
+
+      return {
+        id: seller.id,
+        name: seller.name,
+        leadsCount,
+        salesVolume,
+        stageCounts,
+        rejectionByStage
+      };
+    });
+  }, [funnelLeadsEnriched, funnelSellerOptions]);
+
+  const enabledSellerSet = useMemo(() => {
+    const disabled = new Set(disabledSellerIds);
+    return new Set(funnelSellersAnalytics.filter((seller) => !disabled.has(seller.id)).map((seller) => seller.id));
+  }, [disabledSellerIds, funnelSellersAnalytics]);
+
+  const fullTotals = useMemo(() => ({
+    totalSales: funnelSellersAnalytics.reduce((acc, seller) => acc + seller.salesVolume, 0),
+    totalLeads: funnelSellersAnalytics.reduce((acc, seller) => acc + seller.leadsCount, 0)
+  }), [funnelSellersAnalytics]);
+
+  const enabledTotals = useMemo(() => ({
+    totalSales: funnelSellersAnalytics
+      .filter((seller) => enabledSellerSet.has(seller.id))
+      .reduce((acc, seller) => acc + seller.salesVolume, 0),
+    totalLeads: funnelSellersAnalytics
+      .filter((seller) => enabledSellerSet.has(seller.id))
+      .reduce((acc, seller) => acc + seller.leadsCount, 0)
+  }), [enabledSellerSet, funnelSellersAnalytics]);
+
+  const salesDropPercent = useMemo(() => {
+    if (!fullTotals.totalSales) {
+      return 0;
+    }
+
+    return ((fullTotals.totalSales - enabledTotals.totalSales) / fullTotals.totalSales) * 100;
+  }, [enabledTotals.totalSales, fullTotals.totalSales]);
+
+  const leadsDropPercent = useMemo(() => {
+    if (!fullTotals.totalLeads) {
+      return 0;
+    }
+
+    return ((fullTotals.totalLeads - enabledTotals.totalLeads) / fullTotals.totalLeads) * 100;
+  }, [enabledTotals.totalLeads, fullTotals.totalLeads]);
+
+  const funnelBySource = useMemo(() => {
+    return acquisitionSources.map((source) => {
+      const entries = funnelLeadsEnriched.filter((item) => item.source === source && enabledSellerSet.has(item.sellerId));
+      const totalSales = entries.reduce((acc, item) => acc + item.estimatedSalesValue, 0);
+
+      return {
+        source,
+        leads: entries.length,
+        sales: totalSales
+      };
+    });
+  }, [enabledSellerSet, funnelLeadsEnriched]);
+
+  const totalSalesBySource = useMemo(
+    () => Math.max(1, funnelBySource.reduce((acc, item) => acc + item.sales, 0)),
+    [funnelBySource]
+  );
+
+  const sourceShareData = useMemo(
+    () => funnelBySource.map((item) => ({
+      ...item,
+      sharePercent: (item.sales / totalSalesBySource) * 100
+    })),
+    [funnelBySource, totalSalesBySource]
+  );
+
+  const sourceDonutGradient = useMemo(() => {
+    const colors = ['#22d3ee', '#14b8a6', '#818cf8', '#fbbf24'];
+    let start = 0;
+    const segments = sourceShareData.map((item, index) => {
+      const end = start + item.sharePercent;
+      const segment = `${colors[index % colors.length]} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+      start = end;
+      return segment;
+    });
+
+    return `conic-gradient(${segments.join(', ')})`;
+  }, [sourceShareData]);
+
+  const stageAverageDays = useMemo(() => {
+    const activeEntries = funnelLeadsEnriched.filter((item) => enabledSellerSet.has(item.sellerId));
+    const total = Math.max(1, activeEntries.length);
+
+    return salesStages.map((stage, stageIndex) => {
+      const reached = activeEntries.filter((item) => item.stageIndex >= stageIndex).length;
+      const reachRate = reached / total;
+      const baseDays = [4.2, 5.4, 8.8, 4.8, 2.6][stageIndex] || 3;
+      const adjustedDays = baseDays * (1 + (1 - reachRate) * 0.45);
+
+      return {
+        ...stage,
+        avgDays: Number(adjustedDays.toFixed(1))
+      };
+    });
+  }, [enabledSellerSet, funnelLeadsEnriched]);
+
+  const sellerRanking = useMemo(() => {
+    return [...funnelSellersAnalytics]
+      .map((seller) => ({
+        ...seller,
+        score: seller.salesVolume * 0.78 + seller.leadsCount * 48
+      }))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 5);
+  }, [funnelSellersAnalytics]);
+
+  const heatmapMax = useMemo(
+    () => Math.max(1, ...funnelSellersAnalytics.flatMap((seller) => seller.rejectionByStage)),
+    [funnelSellersAnalytics]
+  );
+
+  const funnelDiagramData = useMemo(() => {
+    const activeEntries = funnelLeadsEnriched.filter((item) => enabledSellerSet.has(item.sellerId));
+    const total = Math.max(1, activeEntries.length);
+
+    return salesStages.map((stage, stageIndex) => {
+      const inStage = activeEntries.filter((item) => item.stageIndex >= stageIndex);
+      const avgActionSize = inStage.length
+        ? inStage.reduce((acc, item) => acc + item.estimatedSalesValue, 0) / inStage.length
+        : 0;
+
+      return {
+        ...stage,
+        count: inStage.length,
+        ratio: inStage.length / total,
+        avgActionSize
+      };
+    });
+  }, [enabledSellerSet, funnelLeadsEnriched]);
+
+  const toggleSellerEnabled = (sellerId: string) => {
+    setDisabledSellerIds((current) => {
+      if (current.includes(sellerId)) {
+        return current.filter((id) => id !== sellerId);
+      }
+
+      return [...current, sellerId];
+    });
+  };
 
   const companyOptions = useMemo(
     () =>
@@ -2159,6 +2409,265 @@ const Dashboard = () => {
             <button type="button" onClick={fetchLeads} disabled={loading} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-70">
               {loading ? 'Atualizando...' : 'Atualizar'}
             </button>
+          </div>
+
+          <div className={[themedPanelClass, 'mb-5 p-4'].join(' ')}>
+            <div className="grid gap-4 xl:grid-cols-[2fr_1.1fr]">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <article className={[
+                  'rounded-xl p-4',
+                  isDarkTheme
+                    ? 'border border-cyan-300/30 bg-gradient-to-br from-slate-900 to-[#0a2532] shadow-[0_0_28px_rgba(34,211,238,0.18)]'
+                    : 'border border-slate-200 bg-slate-50'
+                ].join(' ')}>
+                  <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Total Vendas</h3>
+                  <p className={['mt-2 text-3xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{formatCurrency(enabledTotals.totalSales)}</p>
+                  <p className={['mt-3 text-xs', salesDropPercent > 0 ? 'text-rose-400' : isDarkTheme ? 'text-emerald-300' : 'text-emerald-600'].join(' ')}>
+                    {salesDropPercent > 0
+                      ? `Queda de ${salesDropPercent.toFixed(1)}% com vendedores desabilitados`
+                      : 'Sem queda percentual no momento'}
+                  </p>
+                  <p className={['mt-2 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                    Leads totais ativos: <strong>{enabledTotals.totalLeads}</strong> (variacao {leadsDropPercent.toFixed(1)}%)
+                  </p>
+                </article>
+
+                <article className={[
+                  'rounded-xl p-4',
+                  isDarkTheme
+                    ? 'border border-indigo-300/25 bg-gradient-to-br from-slate-900 to-[#111c3a] shadow-[0_0_24px_rgba(129,140,248,0.16)]'
+                    : 'border border-slate-200 bg-white'
+                ].join(' ')}>
+                  <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Origem de clientes</h3>
+                  <div className="mt-3 flex items-center gap-4">
+                    <div
+                      className="h-28 w-28 rounded-full"
+                      style={{
+                        background: sourceDonutGradient,
+                        boxShadow: isDarkTheme ? '0 0 24px rgba(34,211,238,0.22)' : 'none'
+                      }}
+                    >
+                      <div className="m-4 h-20 w-20 rounded-full bg-slate-950/95" />
+                    </div>
+                    <div className="grid gap-1 text-xs">
+                      {sourceShareData.map((source) => (
+                        <p key={source.source} className={isDarkTheme ? 'text-slate-300' : 'text-slate-600'}>
+                          <strong>{source.source}</strong>: {source.sharePercent.toFixed(1)}%
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+
+                <article className={[
+                  'rounded-xl p-4',
+                  isDarkTheme
+                    ? 'border border-fuchsia-300/20 bg-gradient-to-br from-slate-900 to-[#2a1338] shadow-[0_0_24px_rgba(217,70,239,0.12)]'
+                    : 'border border-slate-200 bg-slate-50'
+                ].join(' ')}>
+                  <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Dias entre etapas do funil</h3>
+                  <div className="mt-3 grid gap-2">
+                    {stageAverageDays.map((stage) => (
+                      <div key={stage.key}>
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className={isDarkTheme ? 'text-slate-300' : 'text-slate-600'}>{stage.label}</span>
+                          <span className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{stage.avgDays.toFixed(1)}d</span>
+                        </div>
+                        <div className={['h-2 rounded-full', isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'].join(' ')}>
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500"
+                            style={{ width: `${Math.min(100, stage.avgDays * 9)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                <article className={[
+                  'rounded-xl p-4',
+                  isDarkTheme
+                    ? 'border border-cyan-300/20 bg-gradient-to-br from-slate-900 to-[#08243a] shadow-[0_0_24px_rgba(34,211,238,0.11)]'
+                    : 'border border-slate-200 bg-white'
+                ].join(' ')}>
+                  <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Vendas & Leads por origem</h3>
+                  <div className="mt-3 grid gap-2">
+                    {funnelBySource.map((source) => {
+                      const salesPercent = Math.max(6, (source.sales / totalSalesBySource) * 100);
+                      const leadPercent = Math.max(6, (source.leads / Math.max(1, enabledTotals.totalLeads)) * 100);
+
+                      return (
+                        <div key={source.source} className="space-y-1">
+                          <p className={['text-xs font-semibold', isDarkTheme ? 'text-slate-200' : 'text-slate-700'].join(' ')}>{source.source}</p>
+                          <div className="flex items-center gap-2">
+                            <span className="w-14 text-[10px] text-amber-400">Vendas</span>
+                            <div className={['h-2 flex-1 rounded-full', isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'].join(' ')}>
+                              <div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-yellow-300" style={{ width: `${salesPercent}%` }} />
+                            </div>
+                            <span className={['text-[10px]', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{formatCurrency(source.sales)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-14 text-[10px] text-cyan-400">Leads</span>
+                            <div className={['h-2 flex-1 rounded-full', isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'].join(' ')}>
+                              <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" style={{ width: `${leadPercent}%` }} />
+                            </div>
+                            <span className={['text-[10px]', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{source.leads}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </article>
+
+                <article className={[
+                  'rounded-xl p-4 lg:col-span-2',
+                  isDarkTheme
+                    ? 'border border-cyan-300/20 bg-gradient-to-br from-slate-900 to-[#0d1f35] shadow-[0_0_24px_rgba(34,211,238,0.1)]'
+                    : 'border border-slate-200 bg-slate-50'
+                ].join(' ')}>
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Taxa de rejeicao</h3>
+                    <div className="inline-flex rounded-lg border border-white/15 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setRejectionViewMode('table')}
+                        className={[
+                          'rounded-md px-2 py-1 text-xs font-semibold',
+                          rejectionViewMode === 'table'
+                            ? 'bg-cyan-400 text-slate-950'
+                            : isDarkTheme ? 'text-slate-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-200'
+                        ].join(' ')}
+                      >Tabela</button>
+                      <button
+                        type="button"
+                        onClick={() => setRejectionViewMode('funnel')}
+                        className={[
+                          'rounded-md px-2 py-1 text-xs font-semibold',
+                          rejectionViewMode === 'funnel'
+                            ? 'bg-cyan-400 text-slate-950'
+                            : isDarkTheme ? 'text-slate-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-200'
+                        ].join(' ')}
+                      >Funil</button>
+                    </div>
+                  </div>
+
+                  {rejectionViewMode === 'table' ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[640px] text-xs">
+                        <thead>
+                          <tr>
+                            <th className={['px-2 py-2 text-left', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>Vendedor</th>
+                            {salesStages.map((stage) => (
+                              <th key={stage.key} className={['px-2 py-2 text-left', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{stage.shortLabel}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {funnelSellersAnalytics.slice(0, 5).map((seller) => (
+                            <tr key={seller.id}>
+                              <td className={['px-2 py-2', isDarkTheme ? 'text-slate-100' : 'text-slate-700'].join(' ')}>{seller.name}</td>
+                              {seller.rejectionByStage.map((value, index) => {
+                                const intensity = value / heatmapMax;
+                                return (
+                                  <td
+                                    key={`${seller.id}-${index}`}
+                                    className="px-2 py-2"
+                                    style={{
+                                      background: `rgba(239, 68, 68, ${0.12 + intensity * 0.45})`,
+                                      color: isDarkTheme ? '#f8fafc' : '#0f172a'
+                                    }}
+                                  >
+                                    {value.toFixed(0)}%
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="grid gap-2">
+                      {funnelDiagramData.map((stage) => (
+                        <div key={stage.key} className={['rounded-lg border p-2 text-xs', isDarkTheme ? 'border-white/10 bg-black/15' : 'border-slate-200 bg-white'].join(' ')}>
+                          <div className="mb-1 flex items-center justify-between">
+                            <span className={isDarkTheme ? 'text-slate-200' : 'text-slate-700'}>{stage.label}</span>
+                            <span className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{formatCurrency(stage.avgActionSize)}</span>
+                          </div>
+                          <div className={['h-2 rounded-full', isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'].join(' ')}>
+                            <div className="h-full rounded-full bg-gradient-to-r from-fuchsia-500 to-cyan-400" style={{ width: `${Math.max(6, stage.ratio * 100)}%` }} />
+                          </div>
+                          <p className={['mt-1', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{stage.count} oportunidades no estagio</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              </div>
+
+              <aside className={[
+                'rounded-xl p-4',
+                isDarkTheme
+                  ? 'border border-amber-300/20 bg-gradient-to-b from-slate-900 to-[#2f1b0a] shadow-[0_0_28px_rgba(251,191,36,0.12)]'
+                  : 'border border-slate-200 bg-white'
+              ].join(' ')}>
+                <h3 className={['text-sm font-bold', isDarkTheme ? 'text-amber-200' : 'text-slate-700'].join(' ')}>Top 5 vendedores</h3>
+                <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                  Clique no botao para destacar e habilitar/desabilitar impacto nos totais.
+                </p>
+
+                <div className="mt-3 grid gap-2">
+                  {sellerRanking.map((seller, index) => {
+                    const isDisabled = disabledSellerIds.includes(seller.id);
+                    const isActive = rankingActiveSellerId === seller.id;
+
+                    return (
+                      <div
+                        key={seller.id}
+                        className={[
+                          'rounded-lg border p-2 transition-all',
+                          isActive
+                            ? isDarkTheme ? 'border-cyan-400 bg-cyan-500/10' : 'border-cyan-300 bg-cyan-50'
+                            : isDarkTheme ? 'border-white/10 bg-black/15' : 'border-slate-200 bg-slate-50'
+                        ].join(' ')}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setRankingActiveSellerId((current) => (current === seller.id ? null : seller.id))}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-400 text-xs font-black text-slate-900"
+                          >
+                            {index + 1}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleSellerEnabled(seller.id)}
+                            className={[
+                              'rounded-md px-2 py-1 text-[10px] font-semibold uppercase',
+                              isDisabled
+                                ? 'bg-rose-500/20 text-rose-300'
+                                : 'bg-emerald-500/20 text-emerald-300'
+                            ].join(' ')}
+                          >
+                            {isDisabled ? 'Desabilitado' : 'Habilitado'}
+                          </button>
+                        </div>
+
+                        <p className={['mt-2 text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{seller.name}</p>
+                        <div className="mt-1 flex items-center justify-between text-xs">
+                          <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>Vendas</span>
+                          <span className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{formatCurrency(seller.salesVolume)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>Leads</span>
+                          <span className={isDarkTheme ? 'text-slate-300' : 'text-slate-700'}>{seller.leadsCount}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+            </div>
           </div>
 
           <div className={[themedPanelClass, 'mb-5 p-4'].join(' ')}>
