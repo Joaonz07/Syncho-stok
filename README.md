@@ -66,22 +66,72 @@ npm run build
 npm run preview
 ```
 
-## Deploy no Railway
+## Deploy no Railway - Arquitetura Separada
 
-Backend service:
+Este projeto usa **dois serviços independentes** no Railway:
 
-- Root Directory: backend
-- Build Command: npm install && npm run build
-- Start Command: npm start
-- Healthcheck Path: /health
-- Environment Variables: PORT, SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY, FRONTEND_URL
+### 1️⃣ Backend Service (noble-warmth)
 
-Frontend service:
+**URL gerada:** `https://noble-warmth-production-bde7.up.railway.app`
 
-- Root Directory: frontend
-- Build Command: npm install && npm run build
-- Start Command: npm run preview
-- Environment Variables: VITE_SUPABASE_URL, VITE_SUPABASE_KEY, VITE_API_URL, PORT
+Configuração Railway:
+- **Root Directory:** `backend`
+- **Build Command:** `npm install && npm run build`
+- **Start Command:** `npm start`
+- **Healthcheck Path:** `/health`
+
+Variáveis de Ambiente (preencha no Railway):
+```
+PORT=                              # Railway auto-atribui
+NODE_ENV=production
+SUPABASE_URL=https://tdjldzfrhwaxnbmpcaup.supabase.co
+SUPABASE_KEY=eyJhbGciOiJIUzI1Ni...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1Ni...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1Ni...
+FRONTEND_URL=https://syncho-frontend.up.railway.app     # (será criado no passo 2)
+SERVE_STATIC_FRONTEND=false
+```
+
+### 2️⃣ Frontend Service (criar novo)
+
+**Passo-a-passo para criar:**
+
+1. Acesse **https://railway.app** → Dashboard
+2. Clique em **+ New** → **GitHub Repo** → Selecione `Syncho-stok`
+3. Configure o novo serviço:
+   - **Service Name:** `syncho-frontend`
+   - **Root Directory:** `frontend`
+   - **Build Command:** `npm install && npm run build`
+   - **Start Command:** `npm run preview`
+
+4. Após criar, vá em **Variables** e adicione:
+   ```
+   PORT=4173
+   VITE_SUPABASE_URL=https://tdjldzfrhwaxnbmpcaup.supabase.co
+   VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   VITE_API_URL=https://noble-warmth-production-bde7.up.railway.app
+   ```
+
+5. Deploy vai iniciar automaticamente. Aguarde até ficar **ACTIVE** (verde).
+
+6. **Copie a URL gerada** do frontend (ex: `syncho-frontend.up.railway.app`)
+
+### 3️⃣ Atualizar Backend com URL do Frontend
+
+Após o frontend estar ACTIVE:
+
+1. Volte ao serviço **noble-warmth** no Railway
+2. Vá em **Variables**
+3. Atualize: `FRONTEND_URL=https://syncho-frontend.up.railway.app`
+4. Salve → Backend vai fazer redeploy automaticamente
+
+### ✅ Validação Final
+
+Acesse `https://syncho-frontend.up.railway.app` no navegador:
+- ✅ Deve mostrar página de login
+- ✅ Após login, deve conectar ao backend
+- ✅ Dados devem persistir no Supabase
+- ✅ Sockets devem funcionar (verifique chat/notificações)
 
 ## Integração em produção
 
