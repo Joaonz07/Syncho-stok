@@ -277,6 +277,8 @@ const Dashboard = () => {
   const [saleLines, setSaleLines] = useState<SaleLine[]>([{ id: 1, productId: '', quantity: 1 }]);
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesAnalysis, setSalesAnalysis] = useState<SalesAnalysis | null>(null);
+  const [salesChartMetric, setSalesChartMetric] = useState<'quantity' | 'price'>('quantity');
+  const [selectedLowStockProductId, setSelectedLowStockProductId] = useState<string | null>(null);
   const [uiTheme, setUiTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') {
       return 'light';
@@ -335,6 +337,78 @@ const Dashboard = () => {
         name: String(company.name || 'Empresa sem nome').trim()
       })),
     [companies]
+  );
+
+  const lowStockChartData = useMemo(() => {
+    const base = [...(salesAnalysis?.lowStockProducts || [])];
+    const metricKey = salesChartMetric;
+
+    return base
+      .sort((left, right) => Number(right[metricKey] || 0) - Number(left[metricKey] || 0))
+      .slice(0, 6)
+      .map((product) => ({
+        id: product.id,
+        name: product.name,
+        code: product.code,
+        quantity: Number(product.quantity || 0),
+        price: Number(product.price || 0),
+        value: Number(product[metricKey] || 0)
+      }));
+  }, [salesAnalysis, salesChartMetric]);
+
+  const lowStockChartMaxValue = useMemo(
+    () => Math.max(1, ...lowStockChartData.map((item) => item.value)),
+    [lowStockChartData]
+  );
+
+  const selectedLowStockProduct = useMemo(() => {
+    if (!lowStockChartData.length) {
+      return null;
+    }
+
+    const selected = lowStockChartData.find((item) => item.id === selectedLowStockProductId);
+    return selected || lowStockChartData[0];
+  }, [lowStockChartData, selectedLowStockProductId]);
+
+  const salesKpiChartData = useMemo(
+    () => [
+      {
+        id: 'revenue',
+        label: 'Faturamento',
+        value: Number(salesAnalysis?.totalRevenue || 0),
+        displayValue: formatCurrency(Number(salesAnalysis?.totalRevenue || 0))
+      },
+      {
+        id: 'sales',
+        label: 'Vendas',
+        value: Number(salesAnalysis?.totalSales || 0),
+        displayValue: String(Number(salesAnalysis?.totalSales || 0))
+      },
+      {
+        id: 'ticket',
+        label: 'Ticket medio',
+        value: Number(salesAnalysis?.averageTicket || 0),
+        displayValue: formatCurrency(Number(salesAnalysis?.averageTicket || 0))
+      },
+      {
+        id: 'stock',
+        label: 'Estoque',
+        value: Number(salesAnalysis?.totalStockUnits || 0),
+        displayValue: String(Number(salesAnalysis?.totalStockUnits || 0))
+      },
+      {
+        id: 'products',
+        label: 'Produtos',
+        value: Number(salesAnalysis?.productsCount || 0),
+        displayValue: String(Number(salesAnalysis?.productsCount || 0))
+      }
+    ],
+    [salesAnalysis]
+  );
+
+  const salesKpiChartMaxValue = useMemo(
+    () => Math.max(1, ...salesKpiChartData.map((item) => item.value)),
+    [salesKpiChartData]
   );
 
   const fetchAdminData = async () => {
@@ -2792,6 +2866,132 @@ const Dashboard = () => {
                     ) : (
                       <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Nenhum produto com estoque baixo.</p>
                     )}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div className={['rounded-xl p-4 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Top produtos (interativo)</h3>
+                      <div className="inline-flex rounded-lg border border-white/10 p-1">
+                        <button
+                          type="button"
+                          onClick={() => setSalesChartMetric('quantity')}
+                          className={[
+                            'rounded-md px-2 py-1 text-xs font-semibold transition-all',
+                            salesChartMetric === 'quantity'
+                              ? 'bg-cyan-500 text-slate-950'
+                              : isDarkTheme
+                                ? 'text-slate-300 hover:bg-white/10'
+                                : 'text-slate-600 hover:bg-slate-200'
+                          ].join(' ')}
+                        >
+                          Quantidade
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSalesChartMetric('price')}
+                          className={[
+                            'rounded-md px-2 py-1 text-xs font-semibold transition-all',
+                            salesChartMetric === 'price'
+                              ? 'bg-cyan-500 text-slate-950'
+                              : isDarkTheme
+                                ? 'text-slate-300 hover:bg-white/10'
+                                : 'text-slate-600 hover:bg-slate-200'
+                          ].join(' ')}
+                        >
+                          Preco
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-2">
+                      {lowStockChartData.length ? (
+                        lowStockChartData.map((item) => {
+                          const percent = Math.max(6, Math.round((item.value / lowStockChartMaxValue) * 100));
+                          const isSelected = selectedLowStockProduct?.id === item.id;
+
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              title={`${item.name} • ${salesChartMetric === 'quantity' ? `${item.quantity} und` : formatCurrency(item.price)}`}
+                              onMouseEnter={() => setSelectedLowStockProductId(item.id)}
+                              onFocus={() => setSelectedLowStockProductId(item.id)}
+                              onClick={() => setSelectedLowStockProductId(item.id)}
+                              className={[
+                                'group rounded-lg border p-2 text-left transition-all',
+                                isSelected
+                                  ? isDarkTheme
+                                    ? 'border-cyan-400/60 bg-cyan-500/10'
+                                    : 'border-cyan-400 bg-cyan-50'
+                                  : isDarkTheme
+                                    ? 'border-white/10 bg-black/10 hover:border-cyan-400/40'
+                                    : 'border-slate-200 bg-white hover:border-cyan-300'
+                              ].join(' ')}
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+                                <span className={['truncate font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-700'].join(' ')}>{item.name}</span>
+                                <span className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>
+                                  {salesChartMetric === 'quantity' ? `${item.quantity} und` : formatCurrency(item.price)}
+                                </span>
+                              </div>
+                              <div className={['h-2 overflow-hidden rounded-full', isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'].join(' ')}>
+                                <div
+                                  className={[
+                                    'h-full rounded-full transition-all duration-500',
+                                    isSelected ? 'bg-gradient-to-r from-cyan-400 to-blue-500' : 'bg-gradient-to-r from-indigo-500 to-cyan-500'
+                                  ].join(' ')}
+                                  style={{ width: `${percent}%` }}
+                                />
+                              </div>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                          Sem dados suficientes para montar o grafico de produtos.
+                        </p>
+                      )}
+                    </div>
+
+                    {selectedLowStockProduct ? (
+                      <div className={['mt-3 rounded-lg p-3 text-xs', isDarkTheme ? 'border border-cyan-400/20 bg-slate-900/60 text-slate-200' : 'border border-slate-200 bg-white text-slate-600'].join(' ')}>
+                        <p><strong>Produto:</strong> {selectedLowStockProduct.name}</p>
+                        <p><strong>Codigo:</strong> {selectedLowStockProduct.code}</p>
+                        <p><strong>Quantidade:</strong> {selectedLowStockProduct.quantity} und</p>
+                        <p><strong>Preco:</strong> {formatCurrency(selectedLowStockProduct.price)}</p>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className={['rounded-xl p-4 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Comparativo dos indicadores</h3>
+                    <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Passe o mouse para comparar os principais numeros do cliente.
+                    </p>
+
+                    <div className="mt-3 grid gap-2">
+                      {salesKpiChartData.map((kpi) => {
+                        const percent = Math.max(5, Math.round((kpi.value / salesKpiChartMaxValue) * 100));
+
+                        return (
+                          <div key={kpi.id} className={['rounded-lg border px-3 py-2 transition-all', isDarkTheme ? 'border-white/10 bg-black/10 hover:border-cyan-400/40' : 'border-slate-200 bg-white hover:border-cyan-300'].join(' ')}>
+                            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+                              <span className={isDarkTheme ? 'text-slate-300' : 'text-slate-500'}>{kpi.label}</span>
+                              <span className={['font-semibold', isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'].join(' ')}>{kpi.displayValue}</span>
+                            </div>
+                            <div className={['h-2 overflow-hidden rounded-full', isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'].join(' ')}>
+                              <div
+                                title={`${kpi.label}: ${kpi.displayValue}`}
+                                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-500 transition-all duration-500"
+                                style={{ width: `${percent}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
