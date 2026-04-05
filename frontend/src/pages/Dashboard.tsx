@@ -1974,12 +1974,33 @@ const Dashboard = () => {
       return;
     }
 
-    const targetCompanyId = getTargetCompanyId(settingsCompanyId);
+    let targetCompanyId = getTargetCompanyId(settingsCompanyId);
+
+    // Para cliente, tenta descobrir a empresa pelo endpoint /me se o contexto local vier vazio.
+    if (!targetCompanyId && role !== 'ADMIN') {
+      try {
+        const meResponse = await fetch('/api/dashboard/me', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (meResponse.ok) {
+          const meResult = await meResponse.json();
+          const resolvedCompanyId = String(meResult?.user?.companyId || '').trim();
+
+          if (resolvedCompanyId) {
+            targetCompanyId = resolvedCompanyId;
+            setSettingsCompanyId(resolvedCompanyId);
+          }
+        }
+      } catch (_error) {
+        // Ignora erro de fallback e segue para mensagem padrão.
+      }
+    }
 
     if (!targetCompanyId) {
       setSettingsSubscription(null);
       setSettingsAccessUntil(null);
-      setStatus('Selecione uma empresa para abrir configuracoes.');
+      setStatus(role === 'ADMIN' ? 'Selecione uma empresa para abrir configuracoes.' : 'Empresa vinculada nao encontrada para carregar configuracoes.');
       return;
     }
 
@@ -1989,9 +2010,37 @@ const Dashboard = () => {
       const response = await fetch(`/api/dashboard/company-info?companyId=${encodeURIComponent(targetCompanyId)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const result = await response.json();
 
-      if (!response.ok) {
+      if (response.status === 401) {
+        setStatus('Sessao expirada. Faca login novamente para carregar configuracoes.');
+        return;
+      }
+
+      let result = await response.json();
+      let loadedByFallback = false;
+
+      if (!response.ok && role !== 'ADMIN') {
+        // Fallback para cliente: tenta pelo endpoint /data (também traz subscription).
+        const fallbackResponse = await fetch(`/api/dashboard/data?companyId=${encodeURIComponent(targetCompanyId)}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (fallbackResponse.ok) {
+          const fallbackResult = await fallbackResponse.json();
+          result = {
+            company: {
+              id: targetCompanyId,
+              name: 'Empresa vinculada',
+              location: null
+            },
+            subscription: fallbackResult.subscription || null,
+            accessUntil: fallbackResult.subscription?.expiresAt || null
+          };
+          loadedByFallback = true;
+        }
+      }
+
+      if (!response.ok && !loadedByFallback) {
         setStatus(result.message || 'Falha ao carregar configuracoes.');
         return;
       }
