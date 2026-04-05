@@ -422,7 +422,7 @@ const ProductCombobox = ({ products, value, onChange, isDarkTheme }: ProductComb
   };
 
   const panelClass = isDarkTheme
-    ? 'border-white/10 bg-gray-950/98 shadow-[0_16px_48px_rgba(0,0,0,0.55)]'
+    ? 'border-white/10 bg-slate-900 shadow-[0_16px_48px_rgba(0,0,0,0.7)]'
     : 'border-slate-200 bg-white shadow-xl';
 
   const triggerClass = isDarkTheme
@@ -474,12 +474,12 @@ const ProductCombobox = ({ products, value, onChange, isDarkTheme }: ProductComb
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.16, ease: 'easeOut' }}
             className={[
-              'absolute left-0 right-0 top-full z-[200] mt-1.5 overflow-hidden rounded-xl border backdrop-blur-md',
+              'absolute left-0 right-0 top-full z-[200] mt-1.5 overflow-hidden rounded-xl border',
               panelClass
             ].join(' ')}
           >
             {/* Search input */}
-            <div className={['px-3 py-2.5 border-b', isDarkTheme ? 'border-white/8' : 'border-slate-100'].join(' ')}>
+            <div className={['px-3 py-2.5 border-b', isDarkTheme ? 'border-white/10' : 'border-slate-100'].join(' ')}>
               <input
                 // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus
@@ -523,7 +523,7 @@ const ProductCombobox = ({ products, value, onChange, isDarkTheme }: ProductComb
                         'flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors',
                         isFocused || isSelected
                           ? isDarkTheme ? 'bg-blue-500/15' : 'bg-blue-50'
-                          : isDarkTheme ? 'hover:bg-white/6' : 'hover:bg-slate-50'
+                          : isDarkTheme ? 'hover:bg-white/10' : 'hover:bg-slate-50'
                       ].join(' ')}
                     >
                       <div className="min-w-0 flex-1">
