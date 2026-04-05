@@ -5040,7 +5040,8 @@ const Dashboard = () => {
                     icon: DollarSign,
                     gradient: 'from-blue-600 to-cyan-500',
                     glow: 'shadow-blue-500/25',
-                    border: isDarkTheme ? 'border-blue-500/20' : 'border-blue-200'
+                    border: isDarkTheme ? 'border-blue-500/20' : 'border-blue-200',
+                    neon: 'rgba(59,130,246,0.24)'
                   },
                   {
                     label: 'Crescimento',
@@ -5049,7 +5050,8 @@ const Dashboard = () => {
                     icon: TrendingUp,
                     gradient: 'from-purple-600 to-pink-500',
                     glow: 'shadow-purple-500/25',
-                    border: isDarkTheme ? 'border-purple-500/20' : 'border-purple-200'
+                    border: isDarkTheme ? 'border-purple-500/20' : 'border-purple-200',
+                    neon: 'rgba(168,85,247,0.24)'
                   },
                   {
                     label: 'Total de Vendas',
@@ -5058,7 +5060,8 @@ const Dashboard = () => {
                     icon: ShoppingCart,
                     gradient: 'from-emerald-600 to-teal-500',
                     glow: 'shadow-emerald-500/25',
-                    border: isDarkTheme ? 'border-emerald-500/20' : 'border-emerald-200'
+                    border: isDarkTheme ? 'border-emerald-500/20' : 'border-emerald-200',
+                    neon: 'rgba(16,185,129,0.22)'
                   },
                   {
                     label: 'Clientes',
@@ -5067,7 +5070,8 @@ const Dashboard = () => {
                     icon: Users,
                     gradient: 'from-orange-500 to-rose-500',
                     glow: 'shadow-orange-500/25',
-                    border: isDarkTheme ? 'border-orange-500/20' : 'border-orange-200'
+                    border: isDarkTheme ? 'border-orange-500/20' : 'border-orange-200',
+                    neon: 'rgba(251,146,60,0.22)'
                   }
                 ].map((card, idx) => {
                   const Icon = card.icon;
@@ -5086,6 +5090,13 @@ const Dashboard = () => {
                           ? `bg-[#0d1117] ${card.border}`
                           : `bg-white ${card.border}`
                       ].join(' ')}
+                      style={
+                        isDarkTheme
+                          ? {
+                              boxShadow: `0 0 0 1px rgba(148,163,184,0.08), 0 0 20px ${card.neon}, 0 10px 30px rgba(2,6,23,0.45)`
+                            }
+                          : undefined
+                      }
                     >
                       {/* Glow blob */}
                       <div className={['pointer-events-none absolute -right-4 -top-4 h-20 w-20 rounded-full bg-gradient-to-br opacity-20 blur-2xl', card.gradient].join(' ')} />
@@ -5121,7 +5132,7 @@ const Dashboard = () => {
                   transition={{ duration: 0.5, delay: 0.2 }}
                   className={[
                     'col-span-2 rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-blue-500/15 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    isDarkTheme ? 'border-blue-500/20 bg-[#0d1117] shadow-[0_0_22px_rgba(59,130,246,0.16)]' : 'border-slate-200 bg-white'
                   ].join(' ')}
                 >
                   <div className="mb-4 flex items-center justify-between">
@@ -5140,6 +5151,13 @@ const Dashboard = () => {
                           <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.35} />
                           <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                         </linearGradient>
+                        <filter id="analyticsLineGlow" x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+                          <feMerge>
+                            <feMergeNode in="coloredBlur" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)'} />
                       <XAxis dataKey="month" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
@@ -5155,7 +5173,7 @@ const Dashboard = () => {
                         }}
                         formatter={(v: unknown) => [formatCurrency(Number(v)), 'Vendas']}
                       />
-                      <Area type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2.5} fill="url(#analyticsGrad)" dot={{ fill: '#3b82f6', r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: '#60a5fa', strokeWidth: 2, stroke: '#0d1117' }} />
+                      <Area type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2.5} fill="url(#analyticsGrad)" filter="url(#analyticsLineGlow)" dot={{ fill: '#3b82f6', r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: '#60a5fa', strokeWidth: 2, stroke: '#0d1117' }} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </motion.div>
@@ -5167,7 +5185,7 @@ const Dashboard = () => {
                   transition={{ duration: 0.5, delay: 0.25 }}
                   className={[
                     'rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-purple-500/15 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    isDarkTheme ? 'border-purple-500/20 bg-[#0d1117] shadow-[0_0_22px_rgba(168,85,247,0.16)]' : 'border-slate-200 bg-white'
                   ].join(' ')}
                 >
                   <div className="mb-2 flex items-center justify-between">
@@ -5197,7 +5215,7 @@ const Dashboard = () => {
                         endAngle={-270}
                       >
                         {(sourcePieData.length > 0 ? sourcePieData : [{ name: 'Loja', value: 40 }, { name: 'WhatsApp', value: 30 }, { name: 'Direto', value: 20 }, { name: 'Outros', value: 10 }]).map((_entry, i) => (
-                          <Cell key={i} fill={['#3b82f6', '#a855f7', '#06b6d4', '#f43f5e'][i % 4]} stroke="transparent" />
+                          <Cell key={i} fill={['#3b82f6', '#a855f7', '#06b6d4', '#f43f5e'][i % 4]} stroke="rgba(255,255,255,0.08)" strokeWidth={1} style={{ filter: 'drop-shadow(0 0 6px rgba(59,130,246,0.25))' }} />
                         ))}
                       </Pie>
                       <Tooltip
@@ -5231,7 +5249,7 @@ const Dashboard = () => {
                   transition={{ duration: 0.5, delay: 0.3 }}
                   className={[
                     'rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-cyan-500/15 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_22px_rgba(6,182,212,0.16)]' : 'border-slate-200 bg-white'
                   ].join(' ')}
                 >
                   <div className="mb-4 flex items-center justify-between">
@@ -5259,6 +5277,13 @@ const Dashboard = () => {
                           <stop offset="0%" stopColor="#06b6d4" />
                           <stop offset="100%" stopColor="#0284c7" />
                         </linearGradient>
+                        <filter id="barGlowCyan" x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
+                          <feMerge>
+                            <feMergeNode in="coloredBlur" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)'} vertical={false} />
                       <XAxis dataKey="name" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
@@ -5275,7 +5300,7 @@ const Dashboard = () => {
                         formatter={(v: unknown) => [formatCurrency(Number(v)), 'Valor']}
                         cursor={{ fill: isDarkTheme ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' }}
                       />
-                      <Bar dataKey="valor" fill="url(#barGradCyan)" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="valor" fill="url(#barGradCyan)" filter="url(#barGlowCyan)" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </motion.div>
@@ -5287,7 +5312,7 @@ const Dashboard = () => {
                   transition={{ duration: 0.5, delay: 0.35 }}
                   className={[
                     'rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-purple-500/15 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    isDarkTheme ? 'border-purple-500/20 bg-[#0d1117] shadow-[0_0_22px_rgba(168,85,247,0.16)]' : 'border-slate-200 bg-white'
                   ].join(' ')}
                 >
                   <div className="mb-4 flex items-center justify-between">
@@ -5316,6 +5341,13 @@ const Dashboard = () => {
                           <stop offset="0%" stopColor="#a855f7" />
                           <stop offset="100%" stopColor="#ec4899" />
                         </linearGradient>
+                        <filter id="barGlowPurple" x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
+                          <feMerge>
+                            <feMergeNode in="coloredBlur" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)'} horizontal={false} />
                       <XAxis type="number" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
@@ -5332,7 +5364,7 @@ const Dashboard = () => {
                         formatter={(v: unknown) => [formatCurrency(Number(v)), 'Vendas']}
                         cursor={{ fill: isDarkTheme ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' }}
                       />
-                      <Bar dataKey="valor" fill="url(#barGradPurple)" radius={[0, 6, 6, 0]} />
+                      <Bar dataKey="valor" fill="url(#barGradPurple)" filter="url(#barGlowPurple)" radius={[0, 6, 6, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </motion.div>
@@ -5345,7 +5377,7 @@ const Dashboard = () => {
                 transition={{ duration: 0.5, delay: 0.45 }}
                 className={[
                   'rounded-2xl border p-5 shadow-xl',
-                  isDarkTheme ? 'border-yellow-500/15 bg-[#0d1117]' : 'border-yellow-200 bg-white'
+                  isDarkTheme ? 'border-yellow-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(234,179,8,0.14)]' : 'border-yellow-200 bg-white'
                 ].join(' ')}
               >
                 <div className="mb-4 flex items-center gap-3">
@@ -5397,7 +5429,7 @@ const Dashboard = () => {
                   transition={{ duration: 0.5, delay: 0.5 }}
                   className={[
                     'rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-white/10 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    isDarkTheme ? 'border-white/10 bg-[#0d1117] shadow-[0_0_16px_rgba(148,163,184,0.1)]' : 'border-slate-200 bg-white'
                   ].join(' ')}
                 >
                   <h3 className={['mb-4 text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>Vendas Recentes</h3>
