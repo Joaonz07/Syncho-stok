@@ -3648,7 +3648,6 @@ const Dashboard = () => {
   const menuItems: SidebarMenuItem[] = [
     { name: 'Dashboard', icon: LayoutDashboard, path: 'companies', group: 'Comercial', adminOnly: true },
     { name: 'Admin SaaS', icon: Sparkles, path: 'admin', group: 'Comercial', adminOnly: true },
-    { name: 'Relatorios', icon: BarChart3, path: 'sales', group: 'Comercial' },
     { name: 'Analise', icon: Activity, path: 'analytics', group: 'Comercial' },
     { name: 'Vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
     { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
