@@ -20,7 +20,7 @@ import { sendMessageByProvider } from '../services/externalMessagingService';
 const router = Router();
 
 const tableAliases = {
-  products: ['products', 'Product'],
+  products: ['products'],
   inventory: ['stock', 'inventory', 'inventories'],
   sales: ['sales', 'Sale'],
   leads: ['leads', 'Lead'],
@@ -964,7 +964,9 @@ const insertWithAliases = async (
       return response;
     }
 
-    lastError = `${tableName}: ${response.error.message || 'erro desconhecido ao inserir'}`;
+    if (!lastError) {
+      lastError = `${tableName}: ${response.error.message || 'erro desconhecido ao inserir'}`;
+    }
   }
 
   return {
@@ -1159,6 +1161,43 @@ router.post('/products', requireAuth, async (req, res) => {
         name,
         code,
         price,
+        quantity,
+        [companyField]: companyId
+      },
+      {
+        name,
+        code,
+        price,
+        quantity,
+        user_id: req.authUser.id,
+        [companyField]: companyId
+      },
+      {
+        name,
+        code,
+        price,
+        quantity,
+        userId: req.authUser.id,
+        [companyField]: companyId
+      },
+      {
+        name,
+        price,
+        quantity,
+        user_id: req.authUser.id,
+        [companyField]: companyId
+      },
+      {
+        name,
+        price,
+        quantity,
+        userId: req.authUser.id,
+        [companyField]: companyId
+      },
+      {
+        name,
+        code,
+        price,
         description,
         quantity,
         [companyField]: companyId
@@ -1200,6 +1239,7 @@ router.post('/products', requireAuth, async (req, res) => {
       {
         name,
         price,
+        quantity,
         [companyField]: companyId
       }
     ];

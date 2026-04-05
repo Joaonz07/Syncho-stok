@@ -6,7 +6,7 @@ type SupportedTable = 'companies' | 'users' | 'products' | 'sales' | 'messages' 
 const tableAliases: Record<SupportedTable, string[]> = {
   companies: ['companies', 'Company'],
   users: ['users', 'User'],
-  products: ['products', 'Product'],
+  products: ['products'],
   sales: ['sales', 'Sale'],
   messages: ['messages', 'Message'],
   leads: ['leads', 'Lead']

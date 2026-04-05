@@ -19,7 +19,7 @@ const router = Router();
 const tableAliases = {
   companies: ['companies', 'Company'],
   users: ['users', 'User'],
-  products: ['products', 'Product'],
+  products: ['products'],
   sales: ['sales', 'Sale'],
   messages: ['messages', 'Message'],
   leads: ['leads', 'Lead']
