@@ -499,6 +499,177 @@ const listIntegrationConversationsWithAliases = async (
   );
 };
 
+const findCompanyIdByIntegrationAccount = async (
+  provider: IntegrationProvider,
+  accountId: string
+) => {
+  const normalizedAccountId = String(accountId || '').trim();
+
+  if (!normalizedAccountId) {
+    return null;
+  }
+
+  for (const tableName of tableAliases.integrations) {
+    for (const companyField of companyFieldAliases) {
+      for (const providerField of integrationProviderFields) {
+        for (const accountField of ['account_id', 'accountId']) {
+          const response = await supabaseAdmin
+            .from(tableName)
+            .select('*')
+            .eq(providerField, provider)
+            .eq(accountField, normalizedAccountId)
+            .maybeSingle();
+
+          if (!response.error && response.data) {
+            return String((response.data as Record<string, unknown>)[companyField] || '').trim() || null;
+          }
+        }
+      }
+    }
+  }
+
+  for (const connection of integrationConnectionMemory.values()) {
+    if (connection.provider === provider && String(connection.accountId || '').trim() === normalizedAccountId) {
+      return connection.companyId;
+    }
+  }
+
+  return null;
+};
+
+const extractWebhookMessageText = (rawMessage: Record<string, unknown>) => {
+  const textBody = String(
+    (rawMessage.text as Record<string, unknown> | undefined)?.body ||
+      rawMessage.body ||
+      rawMessage.message ||
+      ''
+  ).trim();
+
+  if (textBody) {
+    return textBody;
+  }
+
+  const interactiveTitle = String(
+    (rawMessage.interactive as Record<string, unknown> | undefined)?.button_reply ||
+      (rawMessage.interactive as Record<string, unknown> | undefined)?.list_reply ||
+      ''
+  ).trim();
+
+  if (interactiveTitle) {
+    return interactiveTitle;
+  }
+
+  const type = String(rawMessage.type || '').trim();
+
+  if (type) {
+    return `[${type}]`;
+  }
+
+  return '';
+};
+
+const parseMetaWebhookMessages = async (
+  provider: IntegrationProvider,
+  body: Record<string, unknown>
+) => {
+  const parsedMessages: Array<{
+    provider: IntegrationProvider;
+    companyId: string;
+    conversationId: string;
+    userId: string;
+    userName: string;
+    content: string;
+  }> = [];
+
+  const entries = Array.isArray(body.entry)
+    ? (body.entry as Array<Record<string, unknown>>)
+    : [];
+
+  if (provider === 'WHATSAPP') {
+    for (const entry of entries) {
+      const changes = Array.isArray(entry.changes)
+        ? (entry.changes as Array<Record<string, unknown>>)
+        : [];
+
+      for (const change of changes) {
+        const value = (change.value || {}) as Record<string, unknown>;
+        const metadata = (value.metadata || {}) as Record<string, unknown>;
+        const phoneNumberId = String(metadata.phone_number_id || value.phone_number_id || '').trim();
+        const companyId = await findCompanyIdByIntegrationAccount('WHATSAPP', phoneNumberId);
+
+        if (!companyId) {
+          continue;
+        }
+
+        const contacts = Array.isArray(value.contacts)
+          ? (value.contacts as Array<Record<string, unknown>>)
+          : [];
+        const messages = Array.isArray(value.messages)
+          ? (value.messages as Array<Record<string, unknown>>)
+          : [];
+        const defaultName = String(
+          (contacts[0]?.profile as Record<string, unknown> | undefined)?.name || contacts[0]?.wa_id || 'Contato'
+        ).trim();
+
+        for (const message of messages) {
+          const from = String(message.from || '').trim();
+          const content = extractWebhookMessageText(message);
+
+          if (!from || !content) {
+            continue;
+          }
+
+          parsedMessages.push({
+            provider: 'WHATSAPP',
+            companyId,
+            conversationId: from,
+            userId: from,
+            userName: defaultName || from,
+            content
+          });
+        }
+      }
+    }
+
+    return parsedMessages;
+  }
+
+  for (const entry of entries) {
+    const businessAccountId = String(entry.id || '').trim();
+    const companyId = await findCompanyIdByIntegrationAccount('INSTAGRAM', businessAccountId);
+
+    if (!companyId) {
+      continue;
+    }
+
+    const messaging = Array.isArray(entry.messaging)
+      ? (entry.messaging as Array<Record<string, unknown>>)
+      : [];
+
+    for (const event of messaging) {
+      const sender = (event.sender || {}) as Record<string, unknown>;
+      const message = (event.message || {}) as Record<string, unknown>;
+      const from = String(sender.id || '').trim();
+      const content = extractWebhookMessageText(message);
+
+      if (!from || !content) {
+        continue;
+      }
+
+      parsedMessages.push({
+        provider: 'INSTAGRAM',
+        companyId,
+        conversationId: from,
+        userId: from,
+        userName: String(sender.username || sender.name || from).trim() || from,
+        content
+      });
+    }
+  }
+
+  return parsedMessages;
+};
+
 const getCompanyLeadsByStatus = async (companyId: string, status?: LeadStatus) => {
   for (const tableName of tableAliases.leads) {
     for (const companyField of companyFieldAliases) {
@@ -2213,6 +2384,36 @@ router.post('/integrations/messages/send', requireAuth, async (req, res) => {
   });
 });
 
+router.get('/integrations/webhook/:provider', async (req, res) => {
+  const provider = normalizeIntegrationProvider(req.params.provider);
+  const expectedSecret = getIntegrationWebhookSecret();
+  const mode = String(req.query['hub.mode'] || '').trim();
+  const challenge = String(req.query['hub.challenge'] || '').trim();
+  const verifyToken = String(req.query['hub.verify_token'] || '').trim();
+
+  if (!provider) {
+    return res.status(400).json({ message: 'Provider invalido para webhook.' });
+  }
+
+  if (mode !== 'subscribe') {
+    return res.status(400).json({ message: 'Modo de verificacao invalido.' });
+  }
+
+  if (!expectedSecret) {
+    return res.status(500).json({ message: 'INTEGRATION_WEBHOOK_SECRET nao configurado.' });
+  }
+
+  if (verifyToken !== expectedSecret) {
+    return res.status(403).json({ message: 'Webhook verify token invalido.' });
+  }
+
+  if (!challenge) {
+    return res.status(400).json({ message: 'hub.challenge nao informado.' });
+  }
+
+  return res.status(200).send(challenge);
+});
+
 router.post('/integrations/webhook/:provider', async (req, res) => {
   const provider = normalizeIntegrationProvider(req.params.provider);
   const expectedSecret = getIntegrationWebhookSecret();
@@ -2222,37 +2423,42 @@ router.post('/integrations/webhook/:provider', async (req, res) => {
     return res.status(400).json({ message: 'Provider invalido para webhook.' });
   }
 
-  if (expectedSecret && providedSecret !== expectedSecret) {
+  if (expectedSecret && providedSecret && providedSecret !== expectedSecret) {
     return res.status(403).json({ message: 'Webhook secret invalido.' });
   }
 
-  const companyId = String(req.body?.companyId || '').trim();
-  const conversationId = String(req.body?.conversationId || '').trim();
-  const userId = String(req.body?.userId || conversationId).trim();
-  const userName = String(req.body?.userName || 'Contato').trim();
-  const content = String(req.body?.content || '').trim();
+  const parsedMessages = await parseMetaWebhookMessages(
+    provider,
+    (req.body || {}) as Record<string, unknown>
+  );
 
-  if (!companyId || !conversationId || !content) {
-    return res.status(400).json({
-      message: 'companyId, conversationId e content sao obrigatorios no webhook.'
+  if (!parsedMessages.length) {
+    return res.status(202).json({
+      message: 'Webhook recebido, mas sem mensagens processaveis para este provider.'
     });
   }
 
-  const message = await insertIntegrationMessageWithAliases({
-    provider,
-    companyId,
-    conversationId,
-    userId,
-    userName,
-    senderRole: 'CLIENT',
-    content
-  });
+  const persisted: IntegrationChatMessage[] = [];
 
-  emitIntegrationMessage(message);
+  for (const item of parsedMessages) {
+    const message = await insertIntegrationMessageWithAliases({
+      provider: item.provider,
+      companyId: item.companyId,
+      conversationId: item.conversationId,
+      userId: item.userId,
+      userName: item.userName,
+      senderRole: 'CLIENT',
+      content: item.content
+    });
+
+    emitIntegrationMessage(message);
+    persisted.push(message);
+  }
 
   return res.status(201).json({
     message: 'Webhook processado com sucesso.',
-    data: message
+    processed: persisted.length,
+    data: persisted
   });
 });
 
