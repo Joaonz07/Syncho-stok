@@ -16,4 +16,10 @@ export const getPort = () => {
 
 export const getAllowedOrigins = () => parseList(process.env.FRONTEND_URL);
 
-export const shouldServeFrontend = () => String(process.env.SERVE_STATIC_FRONTEND || '').trim() === 'true';
+export const shouldServeFrontend = () => {
+  const value = String(process.env.SERVE_STATIC_FRONTEND || '').trim().toLowerCase();
+  // Se explicitamente false, não servir
+  if (value === 'false') return false;
+  // Padrão: servir frontend em produção (Railway serve tudo junto no Dockerfile)
+  return true;
+};
