@@ -14,7 +14,7 @@ type AuthContextValue = {
   role: 'ADMIN' | 'CLIENT' | null;
   companyId: string | null;
   isAuthenticated: boolean;
-  signIn: (email: string, password: string) => Promise<LoginResult>;
+  signIn: (email: string, password: string, options?: { remember?: boolean }) => Promise<LoginResult>;
   signOut: () => Promise<void>;
 };
 
@@ -108,7 +108,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void init();
   }, []);
 
-  const signIn = async (email: string, password: string): Promise<LoginResult> => {
+  const signIn = async (
+    email: string,
+    password: string,
+    options?: { remember?: boolean }
+  ): Promise<LoginResult> => {
+    const persistSession = options?.remember ?? true;
+
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
@@ -145,7 +151,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         accessToken: nextAccessToken,
         role: resolvedRole,
         companyId: resolvedCompanyId
-      });
+      }, persistSession);
 
       return {
         success: true,

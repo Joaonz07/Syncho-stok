@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { redirectByRole } from '../lib/session';
 import { useAuth } from '../context/AuthContext';
 
@@ -8,6 +9,8 @@ const LoginPage = () => {
   const { signIn, isAuthenticated, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberPassword, setRememberPassword] = useState(true);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -35,7 +38,7 @@ const LoginPage = () => {
     setStatus('Validando acesso...');
 
     try {
-      const result = await signIn(email.trim(), password);
+      const result = await signIn(email.trim(), password, { remember: rememberPassword });
 
       if (!result.success) {
         setStatus(result.message || 'Falha no login.');
@@ -72,13 +75,32 @@ const LoginPage = () => {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-          <input
-            className="rounded-xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-slate-100 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20"
-            placeholder="Senha"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
+          <div className="relative">
+            <input
+              className="w-full rounded-xl border border-slate-700 bg-slate-950/80 px-4 py-3 pr-12 text-slate-100 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20"
+              placeholder="Senha"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((current) => !current)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 transition hover:text-slate-200"
+              aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={rememberPassword}
+              onChange={(event) => setRememberPassword(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
+            />
+            Lembrar senha
+          </label>
           <button disabled={loading} type="submit" className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-70">
             {loading ? 'Entrando...' : 'Entrar'}
           </button>
