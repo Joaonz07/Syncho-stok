@@ -3452,10 +3452,23 @@ const Dashboard = () => {
 
       setStatus('Configuracoes salvas com sucesso.');
       showToast('Configuracoes salvas');
-      await fetchSettings();
-      if (role === 'ADMIN') {
-        await fetchAdminData();
+      
+      // Atualiza localmente com sucesso imediato
+      if (settingsSubscription) {
+        setSettingsSubscription({
+          ...settingsSubscription,
+          plan: settingsPlan,
+          expiresAt: settingsExpiresAt ? new Date(settingsExpiresAt).toISOString() : null
+        });
       }
+      
+      // Depois recarrega do servidor para sincronizar
+      setTimeout(() => {
+        void fetchSettings();
+        if (role === 'ADMIN') {
+          void fetchAdminData();
+        }
+      }, 500);
     } catch (_error) {
       setStatus('Erro de rede ao salvar configuracoes.');
     } finally {

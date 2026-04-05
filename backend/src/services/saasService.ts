@@ -244,8 +244,11 @@ export const updateCompanySubscription = async (
     }
   ];
 
+  console.log(`[updateCompanySubscription] Updating company ${companyId}`, { params });
+
   for (const tableName of COMPANY_TABLES) {
     for (const payload of payloads) {
+      console.log(`[updateCompanySubscription] Attempting ${tableName} with payload:`, payload);
       const response = await supabaseAdmin
         .from(tableName)
         .update(payload)
@@ -253,7 +256,10 @@ export const updateCompanySubscription = async (
         .select('*')
         .single();
 
-      if (!response.error) {
+      console.log(`[updateCompanySubscription] Response from ${tableName}:`, { error: response.error, hasData: !!response.data });
+
+      if (!response.error && response.data) {
+        console.log(`[updateCompanySubscription] Success! Updated company:`, response.data);
         return response;
       }
     }
@@ -268,12 +274,13 @@ export const updateCompanySubscription = async (
         .select('*')
         .single();
 
-      if (!fallback.error) {
+      if (!fallback.error && fallback.data) {
         return fallback;
       }
     }
   }
 
+  console.log(`[updateCompanySubscription] Failed to update company ${companyId}`);
   return {
     data: null,
     error: { message: 'Nao foi possivel atualizar assinatura da empresa.' }

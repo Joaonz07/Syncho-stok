@@ -27,11 +27,14 @@ enum MovementType {
 }
 
 model Company {
-  id        String           @id @default(uuid())
-  name      String
-  plan      SubscriptionPlan @default(BASIC)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  id                  String           @id @default(uuid())
+  name                String
+  location            String?
+  plan                SubscriptionPlan @default(BASIC)
+  subscription_status String           @default("ACTIVE")
+  expires_at          DateTime?        @db.Timestamptz()
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
 
   users    User[]
   products Product[]
@@ -40,13 +43,14 @@ model Company {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  role      UserRole @default(CLIENT)
-  companyId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String
+  email       String   @unique
+  role        UserRole @default(CLIENT)
+  companyId   String?
+  access_until DateTime? @db.Timestamptz()
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   company  Company?  @relation(fields: [companyId], references: [id])
   sales    Sale[]
