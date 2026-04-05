@@ -3,6 +3,7 @@ import type { DragEvent } from 'react';
 import { Navigate } from 'react-router-dom';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
+import { getAccessToken } from '../lib/session';
 
 type LeadStatus =
   | 'NOVO_CONTATO'
@@ -139,9 +140,26 @@ const formatCurrency = (value: number) =>
 const sortByPosition = (items: Lead[]) =>
   [...items].sort((left, right) => Number(left.position || 0) - Number(right.position || 0));
 
+const getUserIdFromJwt = (jwt: string) => {
+  try {
+    const parts = String(jwt || '').split('.');
+
+    if (parts.length < 2) {
+      return '';
+    }
+
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(base64)) as { sub?: string };
+    return String(payload.sub || '').trim();
+  } catch (_error) {
+    return '';
+  }
+};
+
 const Dashboard = () => {
-  const { session, companyId, role, isAuthenticated, loading: authLoading, signOut } = useAuth();
-  const token = session?.access_token || '';
+  const { companyId, role, isAuthenticated, loading: authLoading, signOut } = useAuth();
+  const token = getAccessToken();
+  const currentUserId = useMemo(() => getUserIdFromJwt(token), [token]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [activeView, setActiveView] = useState<'pipeline' | 'companies' | 'clients' | 'products' | 'settings' | 'sales'>('pipeline');
@@ -828,7 +846,7 @@ const Dashboard = () => {
         return;
       }
 
-      const isOwnMessage = incoming.senderId === session?.user?.id;
+      const isOwnMessage = incoming.senderId === currentUserId;
       const isCurrentThread = incoming.requestId && incoming.requestId === selectedSupportRequestId;
 
       if (!isOwnMessage) {
@@ -886,7 +904,7 @@ const Dashboard = () => {
           return;
         }
 
-        if (typingPayload.userId === session?.user?.id) {
+        if (typingPayload.userId === currentUserId) {
           return;
         }
 
@@ -923,7 +941,7 @@ const Dashboard = () => {
       supportSocketRef.current = null;
       setSupportChatConnected(false);
     };
-  }, [token, activeView, settingsCompanyId, role, companyId, session?.user?.id, selectedSupportRequestId]);
+  }, [token, activeView, settingsCompanyId, role, companyId, currentUserId, selectedSupportRequestId]);
 
   useEffect(() => {
     if (activeView !== 'settings') {
@@ -2528,7 +2546,7 @@ const Dashboard = () => {
                                 <div className="max-h-72 space-y-2 overflow-y-auto">
                                   {supportChatMessages.length ? (
                                     supportChatMessages.map((message) => {
-                                      const isMine = message.senderId === session?.user?.id;
+                                      const isMine = message.senderId === currentUserId;
 
                                       return (
                                         <div

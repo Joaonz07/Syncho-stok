@@ -1,8 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
-import { clearSession, saveSession } from '../lib/session';
+import { clearSession, getAccessToken, getCompanyId, getRole, saveSession } from '../lib/session';
 
 type LoginResult = {
   success: boolean;
@@ -12,8 +10,6 @@ type LoginResult = {
 
 type AuthContextValue = {
   loading: boolean;
-  session: Session | null;
-  user: User | null;
   role: 'ADMIN' | 'CLIENT' | null;
   companyId: string | null;
   isAuthenticated: boolean;
@@ -25,6 +21,14 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const normalizeRole = (value: unknown): 'ADMIN' | 'CLIENT' =>
   String(value || 'CLIENT').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'CLIENT';
+
+const safeParseJson = async (response: Response) => {
+  try {
+    return await response.json();
+  } catch (_error) {
+    return null;
+  }
+};
 
 const getProfileFromApi = async (accessToken: string) => {
   const response = await fetch('/api/dashboard/me', {
@@ -48,122 +52,121 @@ const getProfileFromApi = async (accessToken: string) => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [accessToken, setAccessToken] = useState('');
   const [role, setRole] = useState<'ADMIN' | 'CLIENT' | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
 
-  const syncSessionState = async (activeSession: Session | null) => {
-    setSession(activeSession);
-    setUser(activeSession?.user || null);
+  const syncSessionState = async (token: string) => {
+    const normalizedToken = String(token || '').trim();
 
-    if (!activeSession?.access_token) {
+    if (!normalizedToken) {
+      setAccessToken('');
       clearSession();
       setRole(null);
       setCompanyId(null);
       return;
     }
 
-    const profile = await getProfileFromApi(activeSession.access_token);
+    const profile = await getProfileFromApi(normalizedToken);
+    setAccessToken(normalizedToken);
     setRole(profile.role);
     setCompanyId(profile.companyId);
 
     saveSession({
-      accessToken: activeSession.access_token,
+      accessToken: normalizedToken,
       role: profile.role,
       companyId: profile.companyId
     });
   };
 
   useEffect(() => {
-    let mounted = true;
-
     const init = async () => {
-      const { data } = await supabase.auth.getSession();
+      const storedToken = getAccessToken();
 
-      if (!mounted) {
+      if (!storedToken) {
+        clearSession();
+        setAccessToken('');
+        setRole(null);
+        setCompanyId(null);
+        setLoading(false);
         return;
       }
 
-      await syncSessionState(data.session || null);
-      setLoading(false);
+      try {
+        await syncSessionState(storedToken);
+      } catch (_error) {
+        clearSession();
+        setAccessToken('');
+        setRole(null);
+        setCompanyId(null);
+      } finally {
+        setLoading(false);
+      }
     };
-
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
-      void syncSessionState(currentSession || null);
-    });
 
     void init();
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
   }, []);
 
   const signIn = async (email: string, password: string): Promise<LoginResult> => {
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.trim(), password })
-    });
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password })
+      });
 
-    const result = await response.json();
+      const result = await safeParseJson(response);
 
-    if (!response.ok) {
+      if (!response.ok) {
+        return {
+          success: false,
+          message: result?.message || 'Falha no login.'
+        };
+      }
+
+      const nextAccessToken = String(result?.session?.access_token || '').trim();
+
+      if (!nextAccessToken) {
+        return {
+          success: false,
+          message: 'Sessao invalida retornada pelo servidor.'
+        };
+      }
+
+      const resolvedRole = normalizeRole(result?.role || getRole());
+      const resolvedCompanyId = String(result?.companyId || getCompanyId() || '').trim() || null;
+
+      setAccessToken(nextAccessToken);
+      setRole(resolvedRole);
+      setCompanyId(resolvedCompanyId);
+
+      saveSession({
+        accessToken: nextAccessToken,
+        role: resolvedRole,
+        companyId: resolvedCompanyId
+      });
+
+      return {
+        success: true,
+        role: resolvedRole
+      };
+    } catch (_error) {
       return {
         success: false,
-        message: result.message || 'Falha no login.'
+        message: 'Erro de rede ao fazer login.'
       };
     }
-
-    const accessToken = String(result?.session?.access_token || '').trim();
-    const refreshToken = String(result?.session?.refresh_token || '').trim();
-
-    if (!accessToken || !refreshToken) {
-      return {
-        success: false,
-        message: 'Sessao invalida retornada pelo servidor.'
-      };
-    }
-
-    const { error } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken
-    });
-
-    if (error) {
-      return {
-        success: false,
-        message: error.message || 'Falha ao persistir sessao.'
-      };
-    }
-
-    const resolvedRole = normalizeRole(result.role);
-    const resolvedCompanyId = String(result.companyId || '').trim() || null;
-
-    setRole(resolvedRole);
-    setCompanyId(resolvedCompanyId);
-
-    saveSession({
-      accessToken,
-      role: resolvedRole,
-      companyId: resolvedCompanyId
-    });
-
-    return {
-      success: true,
-      role: resolvedRole
-    };
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (_error) {
+      // ignora erro de rede no logout e limpa sessao local mesmo assim
+    }
+
     clearSession();
-    setSession(null);
-    setUser(null);
+    setAccessToken('');
     setRole(null);
     setCompanyId(null);
   };
@@ -171,15 +174,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const value = useMemo<AuthContextValue>(
     () => ({
       loading,
-      session,
-      user,
       role,
       companyId,
-      isAuthenticated: Boolean(session?.access_token),
+      isAuthenticated: Boolean(accessToken),
       signIn,
       signOut
     }),
-    [loading, session, user, role, companyId]
+    [loading, accessToken, role, companyId]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
