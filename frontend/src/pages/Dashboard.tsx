@@ -308,6 +308,7 @@ const Dashboard = () => {
   const [salesAnalysis, setSalesAnalysis] = useState<SalesAnalysis | null>(null);
   const [salesChartMetric, setSalesChartMetric] = useState<'quantity' | 'price'>('quantity');
   const [salesTrendPeriod, setSalesTrendPeriod] = useState<'7d' | '30d' | '90d'>('30d');
+  const [selectedTrendPointIndex, setSelectedTrendPointIndex] = useState<number | null>(null);
   const [selectedLowStockProductId, setSelectedLowStockProductId] = useState<string | null>(null);
   const [uiTheme, setUiTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') {
@@ -470,6 +471,31 @@ const Dashboard = () => {
     const values = salesTrendSeries.map((item) => Number(item.value || 0));
     return buildSvgPoints(values, 520, 210, 24);
   }, [salesTrendSeries]);
+
+  const salesTrendPoints = useMemo(() => {
+    const values = salesTrendSeries.map((item) => Number(item.value || 0));
+    const max = Math.max(1, ...values);
+    const stepX = salesTrendSeries.length > 1 ? (520 - 48) / (salesTrendSeries.length - 1) : 0;
+
+    return salesTrendSeries.map((point, index) => ({
+      ...point,
+      index,
+      x: 24 + stepX * index,
+      y: 186 - (Number(point.value || 0) / max) * (210 - 48)
+    }));
+  }, [salesTrendSeries]);
+
+  const activeTrendPoint = useMemo(() => {
+    if (!salesTrendPoints.length) {
+      return null;
+    }
+
+    if (selectedTrendPointIndex === null) {
+      return salesTrendPoints[salesTrendPoints.length - 1];
+    }
+
+    return salesTrendPoints.find((point) => point.index === selectedTrendPointIndex) || salesTrendPoints[salesTrendPoints.length - 1];
+  }, [salesTrendPoints, selectedTrendPointIndex]);
 
   const fetchAdminData = async () => {
     if (role !== 'ADMIN' || !token) {
@@ -3112,17 +3138,48 @@ const Dashboard = () => {
                           />
                         ) : null}
 
-                        {salesTrendSeries.map((point, index) => {
-                          const values = salesTrendSeries.map((item) => Number(item.value || 0));
-                          const max = Math.max(1, ...values);
-                          const stepX = salesTrendSeries.length > 1 ? (520 - 48) / (salesTrendSeries.length - 1) : 0;
-                          const x = 24 + stepX * index;
-                          const y = 186 - (Number(point.value || 0) / max) * (210 - 48);
+                        {activeTrendPoint ? (
+                          <line
+                            x1={activeTrendPoint.x}
+                            y1="24"
+                            x2={activeTrendPoint.x}
+                            y2="186"
+                            stroke={isDarkTheme ? '#22d3ee' : '#0284c7'}
+                            strokeWidth="1.5"
+                            strokeDasharray="5 5"
+                            opacity="0.65"
+                          />
+                        ) : null}
+
+                        {salesTrendPoints.map((point) => {
+                          const isActive = activeTrendPoint?.index === point.index;
 
                           return (
-                            <g key={`${point.label}-${index}`}>
-                              <circle cx={x} cy={y} r="5" fill={isDarkTheme ? '#22d3ee' : '#0284c7'} style={{ animation: `chartFadeIn 380ms ease ${index * 80}ms both` }} />
-                              <text x={x} y={202} textAnchor="middle" fontSize="10" fill={isDarkTheme ? '#cbd5e1' : '#475569'}>
+                            <g key={`${point.label}-${point.index}`}>
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r="12"
+                                fill="transparent"
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`Ponto ${point.label} com valor ${formatCurrency(point.value)}`}
+                                style={{ cursor: 'pointer' }}
+                                onMouseEnter={() => setSelectedTrendPointIndex(point.index)}
+                                onClick={() => setSelectedTrendPointIndex(point.index)}
+                                onFocus={() => setSelectedTrendPointIndex(point.index)}
+                              />
+                              <circle
+                                cx={point.x}
+                                cy={point.y}
+                                r={isActive ? 7 : 5}
+                                fill={isDarkTheme ? '#22d3ee' : '#0284c7'}
+                                style={{
+                                  animation: `chartFadeIn 380ms ease ${point.index * 80}ms both`,
+                                  filter: isActive ? 'drop-shadow(0 0 10px rgba(34,211,238,0.9))' : 'none'
+                                }}
+                              />
+                              <text x={point.x} y={202} textAnchor="middle" fontSize="10" fill={isDarkTheme ? '#cbd5e1' : '#475569'}>
                                 {point.label}
                               </text>
                             </g>
@@ -3130,6 +3187,13 @@ const Dashboard = () => {
                         })}
                       </svg>
                     </div>
+
+                    {activeTrendPoint ? (
+                      <div className={['mt-3 rounded-lg p-3 text-xs', isDarkTheme ? 'border border-cyan-400/25 bg-slate-950/70 text-cyan-100' : 'border border-slate-200 bg-white text-slate-700'].join(' ')}>
+                        <p><strong>Ponto:</strong> {activeTrendPoint.label}</p>
+                        <p><strong>Valor estimado:</strong> {formatCurrency(activeTrendPoint.value)}</p>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className={['rounded-xl p-4 transition-all', isDarkTheme ? 'border border-fuchsia-300/25 bg-gradient-to-b from-slate-900/85 to-slate-950/85 shadow-[0_0_35px_rgba(217,70,239,0.14),inset_0_0_18px_rgba(56,189,248,0.06)]' : 'border border-slate-200 bg-slate-50'].join(' ')}>
