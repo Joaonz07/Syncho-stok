@@ -82,15 +82,20 @@ type CheckoutItem = {
   quantity: number;
 };
 
-const getSupportMessagesWithAliases = async (companyId: string) => {
+const getSupportMessagesWithAliases = async (companyId: string, requestId?: string | null) => {
   for (const tableName of tableAliases.messages) {
     for (const companyField of companyFieldAliases) {
-      const response = await supabaseAdmin
+      let query = supabaseAdmin
         .from(tableName)
         .select('*')
         .eq(companyField, companyId)
-        .order('created_at', { ascending: true })
-        .limit(200);
+        .order('created_at', { ascending: true });
+
+      if (requestId) {
+        query = query.like('content', `[REQ:${requestId}]%`);
+      }
+
+      const response = await query.limit(requestId ? 100 : 200);
 
       if (!response.error) {
         return response;
@@ -2095,7 +2100,7 @@ router.get('/support-chat/messages', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'companyId e obrigatorio para carregar chat de suporte.' });
   }
 
-  const response = await getSupportMessagesWithAliases(companyId);
+  const response = await getSupportMessagesWithAliases(companyId, requestId);
 
   if (response.error || !response.data) {
     return res.status(400).json({ message: response.error?.message || 'Falha ao carregar mensagens.' });

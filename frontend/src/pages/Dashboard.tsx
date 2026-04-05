@@ -789,6 +789,8 @@ const Dashboard = () => {
   const [planEditorFeatures, setPlanEditorFeatures] = useState('');
   const supportSocketRef = useRef<Socket | null>(null);
   const supportTypingTimeoutRef = useRef<number | null>(null);
+  const selectedSupportRequestIdRef = useRef<string | null>(null);
+  const activeViewRef = useRef<DashboardView>('pipeline');
 
   const playSupportNotificationTone = () => {
     if (typeof window === 'undefined') {
@@ -1836,6 +1838,20 @@ const Dashboard = () => {
     return String(companyId || companyIdFromJwt || getSessionCompanyId() || '').trim();
   };
 
+  const getSupportChatCompanyId = (requestId: string | null = selectedSupportRequestId) => {
+    const normalizedRequestId = String(requestId || '').trim();
+    const selectedRequest = normalizedRequestId
+      ? supportRequests.find((request) => request.id === normalizedRequestId)
+      : null;
+    const requestCompanyId = String(selectedRequest?.companyId || '').trim();
+
+    if (requestCompanyId) {
+      return requestCompanyId;
+    }
+
+    return getTargetCompanyId(settingsCompanyId);
+  };
+
   useEffect(() => {
     if (role === 'ADMIN') {
       return;
@@ -2119,7 +2135,7 @@ const Dashboard = () => {
       return;
     }
 
-    const targetCompanyId = getTargetCompanyId(settingsCompanyId);
+    const targetCompanyId = getSupportChatCompanyId(requestId);
 
     if (!targetCompanyId || !requestId) {
       setSupportChatMessages([]);
@@ -2157,7 +2173,7 @@ const Dashboard = () => {
       return;
     }
 
-    const targetCompanyId = getTargetCompanyId(settingsCompanyId);
+    const targetCompanyId = getSupportChatCompanyId(selectedSupportRequestId);
     const content = supportChatText.trim();
 
     if (!targetCompanyId) {
@@ -2207,7 +2223,7 @@ const Dashboard = () => {
   };
 
   const emitSupportTyping = (isTyping: boolean) => {
-    const targetCompanyId = getTargetCompanyId(settingsCompanyId);
+    const targetCompanyId = getSupportChatCompanyId(selectedSupportRequestId);
 
     if (!targetCompanyId || !selectedSupportRequestId || !supportSocketRef.current?.connected) {
       return;
@@ -2448,6 +2464,14 @@ const Dashboard = () => {
   }, [activeView, token, settingsCompanyId, selectedSupportRequestId]);
 
   useEffect(() => {
+    selectedSupportRequestIdRef.current = selectedSupportRequestId;
+  }, [selectedSupportRequestId]);
+
+  useEffect(() => {
+    activeViewRef.current = activeView;
+  }, [activeView]);
+
+  useEffect(() => {
     if (activeView === 'admin' && role === 'ADMIN') {
       void fetchAdminData();
       void fetchSupportRequests();
@@ -2476,14 +2500,20 @@ const Dashboard = () => {
     });
 
     socket.on('support:new-message', (incoming: SupportChatMessage) => {
-      setSupportChatMessages((current) => {
-        if (current.some((msg) => msg.id === incoming.id)) {
-          return current;
-        }
+      const currentRequestId = selectedSupportRequestIdRef.current;
+      const currentView = activeViewRef.current;
 
-        return [...current, incoming];
-      });
-      
+      if (currentView === 'chat' && currentRequestId && incoming.requestId === currentRequestId) {
+        setSupportChatMessages((current) => {
+          if (current.some((msg) => msg.id === incoming.id)) {
+            return current;
+          }
+
+          return [...current, incoming];
+        });
+        return;
+      }
+
       showToast(`Nova mensagem de ${incoming.senderName || 'suporte'}`);
       playSupportNotificationTone();
       setSupportUnreadCount((current) => current + 1);
@@ -2555,14 +2585,37 @@ const Dashboard = () => {
       return;
     }
 
-    const targetCompanyId = getTargetCompanyId(settingsCompanyId);
-
-    if (!targetCompanyId || !supportSocketRef.current?.connected) {
+    if (!supportSocketRef.current?.connected) {
       return;
     }
 
-    supportSocketRef.current.emit('support:join', { companyId: targetCompanyId });
-  }, [activeView, settingsCompanyId]);
+    const companyIds = new Set<string>();
+    const targetCompanyId = getTargetCompanyId(settingsCompanyId);
+
+    if (targetCompanyId) {
+      companyIds.add(targetCompanyId);
+    }
+
+    if (role === 'ADMIN' && !targetCompanyId) {
+      supportRequests.forEach((request) => {
+        const companyOfRequest = String(request.companyId || '').trim();
+
+        if (companyOfRequest) {
+          companyIds.add(companyOfRequest);
+        }
+      });
+    }
+
+    const selectedRequestCompanyId = getSupportChatCompanyId(selectedSupportRequestId);
+
+    if (selectedRequestCompanyId) {
+      companyIds.add(selectedRequestCompanyId);
+    }
+
+    companyIds.forEach((companyIdToJoin) => {
+      supportSocketRef.current?.emit('support:join', { companyId: companyIdToJoin });
+    });
+  }, [activeView, role, settingsCompanyId, selectedSupportRequestId, supportRequests, supportChatConnected]);
 
   useEffect(() => {
     if (activeView === 'sales') {
