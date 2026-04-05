@@ -976,6 +976,20 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
       price: Number(product.price || 0)
     }));
 
+  const recentSales = [...sales]
+    .sort((left, right) => {
+      const leftTime = new Date(String(left.created_at || left.createdAt || 0)).getTime();
+      const rightTime = new Date(String(right.created_at || right.createdAt || 0)).getTime();
+      return rightTime - leftTime;
+    })
+    .slice(0, 20)
+    .map((sale) => ({
+      id: String(sale.id || ''),
+      total: Number(sale.total || 0),
+      userId: String(sale.user_id || sale.userId || '').trim() || null,
+      createdAt: String(sale.created_at || sale.createdAt || new Date().toISOString())
+    }));
+
   return res.status(200).json({
     companyId,
     totalRevenue,
@@ -984,6 +998,7 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
     totalStockUnits,
     productsCount: products.length,
     lowStockProducts,
+    recentSales,
     errors: [salesResponse.error, productsResponse.error].filter(Boolean)
   });
 });

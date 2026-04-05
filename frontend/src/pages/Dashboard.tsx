@@ -85,6 +85,12 @@ type SalesAnalysis = {
   averageTicket: number;
   totalStockUnits: number;
   productsCount: number;
+  recentSales?: Array<{
+    id: string;
+    total: number;
+    userId: string | null;
+    createdAt: string;
+  }>;
   lowStockProducts: Array<{
     id: string;
     name: string;
@@ -136,6 +142,19 @@ const columns: Array<{ key: LeadStatus; label: string }> = [
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
+
+const formatDateTime = (value: string) => {
+  const date = new Date(String(value || ''));
+
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short'
+  }).format(date);
+};
 
 const buildSvgPoints = (values: number[], width: number, height: number, padding = 20) => {
   if (!values.length) {
@@ -252,7 +271,6 @@ const Dashboard = () => {
   const [recentlyMovedLeadId, setRecentlyMovedLeadId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [disabledSellerIds, setDisabledSellerIds] = useState<string[]>([]);
-  const [rankingActiveSellerId, setRankingActiveSellerId] = useState<string | null>(null);
   const [rejectionViewMode, setRejectionViewMode] = useState<'table' | 'funnel'>('table');
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -450,10 +468,27 @@ const Dashboard = () => {
   }, [leads, funnelSellerOptions]);
 
   const funnelSellersAnalytics = useMemo(() => {
+    const salesBySeller = new Map<string, number>();
+    const recentSales = salesAnalysis?.recentSales || [];
+
+    for (const sale of recentSales) {
+      const sellerId = String(sale.userId || '').trim();
+
+      if (!sellerId) {
+        continue;
+      }
+
+      salesBySeller.set(sellerId, (salesBySeller.get(sellerId) || 0) + Number(sale.total || 0));
+    }
+
+    const fallbackAvg = recentSales.length
+      ? recentSales.reduce((acc, sale) => acc + Number(sale.total || 0), 0) / Math.max(1, funnelSellerOptions.length)
+      : 0;
+
     return funnelSellerOptions.map((seller) => {
       const entries = funnelLeadsEnriched.filter((item) => item.sellerId === seller.id);
       const leadsCount = entries.length;
-      const salesVolume = entries.reduce((acc, item) => acc + Number(item.estimatedSalesValue || 0), 0);
+      const salesVolume = Number(salesBySeller.get(seller.id) || (leadsCount ? fallbackAvg * (leadsCount / Math.max(1, funnelLeadsEnriched.length)) : 0));
       const stageCounts = salesStages.map((stage) => entries.filter((item) => item.lead.status === stage.key).length);
 
       const rejectionByStage = salesStages.map((_stage, stageIndex) => {
@@ -474,7 +509,7 @@ const Dashboard = () => {
         rejectionByStage
       };
     });
-  }, [funnelLeadsEnriched, funnelSellerOptions]);
+  }, [funnelLeadsEnriched, funnelSellerOptions, salesAnalysis]);
 
   const enabledSellerSet = useMemo(() => {
     const disabled = new Set(disabledSellerIds);
@@ -482,18 +517,24 @@ const Dashboard = () => {
   }, [disabledSellerIds, funnelSellersAnalytics]);
 
   const fullTotals = useMemo(() => ({
-    totalSales: funnelSellersAnalytics.reduce((acc, seller) => acc + seller.salesVolume, 0),
+    totalSales:
+      Number(salesAnalysis?.totalRevenue || 0) ||
+      funnelSellersAnalytics.reduce((acc, seller) => acc + seller.salesVolume, 0),
     totalLeads: funnelSellersAnalytics.reduce((acc, seller) => acc + seller.leadsCount, 0)
-  }), [funnelSellersAnalytics]);
+  }), [funnelSellersAnalytics, salesAnalysis]);
 
   const enabledTotals = useMemo(() => ({
-    totalSales: funnelSellersAnalytics
-      .filter((seller) => enabledSellerSet.has(seller.id))
-      .reduce((acc, seller) => acc + seller.salesVolume, 0),
+    totalSales: Math.max(
+      0,
+      fullTotals.totalSales -
+        funnelSellersAnalytics
+          .filter((seller) => !enabledSellerSet.has(seller.id))
+          .reduce((acc, seller) => acc + seller.salesVolume, 0)
+    ),
     totalLeads: funnelSellersAnalytics
       .filter((seller) => enabledSellerSet.has(seller.id))
       .reduce((acc, seller) => acc + seller.leadsCount, 0)
-  }), [enabledSellerSet, funnelSellersAnalytics]);
+  }), [enabledSellerSet, funnelSellersAnalytics, fullTotals.totalSales]);
 
   const salesDropPercent = useMemo(() => {
     if (!fullTotals.totalSales) {
@@ -566,16 +607,6 @@ const Dashboard = () => {
       };
     });
   }, [enabledSellerSet, funnelLeadsEnriched]);
-
-  const sellerRanking = useMemo(() => {
-    return [...funnelSellersAnalytics]
-      .map((seller) => ({
-        ...seller,
-        score: seller.salesVolume * 0.78 + seller.leadsCount * 48
-      }))
-      .sort((left, right) => right.score - left.score)
-      .slice(0, 5);
-  }, [funnelSellersAnalytics]);
 
   const heatmapMax = useMemo(
     () => Math.max(1, ...funnelSellersAnalytics.flatMap((seller) => seller.rejectionByStage)),
@@ -1123,16 +1154,20 @@ const Dashboard = () => {
     }
   };
 
-  const fetchSalesAnalysis = async () => {
+  const fetchSalesAnalysis = async (options?: { silent?: boolean }) => {
     if (!token) {
       return;
     }
+
+    const silent = Boolean(options?.silent);
 
     const targetCompanyId = getTargetCompanyId(salesCompanyId);
 
     if (!targetCompanyId) {
       setSalesAnalysis(null);
-      setStatus('Selecione uma empresa para ver a analise de vendas.');
+      if (!silent) {
+        setStatus('Selecione uma empresa para ver a analise de vendas.');
+      }
       return;
     }
 
@@ -1148,14 +1183,20 @@ const Dashboard = () => {
       const result = await response.json();
 
       if (!response.ok) {
-        setStatus(result.message || 'Falha ao carregar analise de vendas.');
+        if (!silent) {
+          setStatus(result.message || 'Falha ao carregar analise de vendas.');
+        }
         return;
       }
 
       setSalesAnalysis(result as SalesAnalysis);
-      setStatus('Analise de vendas carregada com sucesso.');
+      if (!silent) {
+        setStatus('Analise de vendas carregada com sucesso.');
+      }
     } catch (_error) {
-      setStatus('Erro de rede ao carregar analise de vendas.');
+      if (!silent) {
+        setStatus('Erro de rede ao carregar analise de vendas.');
+      }
     } finally {
       setSalesLoading(false);
     }
@@ -1371,6 +1412,11 @@ const Dashboard = () => {
     if (activeView === 'sales') {
       void fetchProducts();
       void fetchSalesAnalysis();
+      return;
+    }
+
+    if (activeView === 'pipeline') {
+      void fetchSalesAnalysis({ silent: true });
     }
   }, [activeView, token, companyId, role, salesCompanyId]);
 
@@ -2611,34 +2657,25 @@ const Dashboard = () => {
                   ? 'border border-amber-300/20 bg-gradient-to-b from-slate-900 to-[#2f1b0a] shadow-[0_0_28px_rgba(251,191,36,0.12)]'
                   : 'border border-slate-200 bg-white'
               ].join(' ')}>
-                <h3 className={['text-sm font-bold', isDarkTheme ? 'text-amber-200' : 'text-slate-700'].join(' ')}>Top 5 vendedores</h3>
+                <h3 className={['text-sm font-bold', isDarkTheme ? 'text-amber-200' : 'text-slate-700'].join(' ')}>Integracao de vendas</h3>
                 <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                  Clique no botao para destacar e habilitar/desabilitar impacto nos totais.
+                  Controle os vendedores ativos e acompanhe cada venda com data e horario automaticos.
                 </p>
 
                 <div className="mt-3 grid gap-2">
-                  {sellerRanking.map((seller, index) => {
+                  {funnelSellersAnalytics.map((seller) => {
                     const isDisabled = disabledSellerIds.includes(seller.id);
-                    const isActive = rankingActiveSellerId === seller.id;
 
                     return (
                       <div
                         key={seller.id}
                         className={[
                           'rounded-lg border p-2 transition-all',
-                          isActive
-                            ? isDarkTheme ? 'border-cyan-400 bg-cyan-500/10' : 'border-cyan-300 bg-cyan-50'
-                            : isDarkTheme ? 'border-white/10 bg-black/15' : 'border-slate-200 bg-slate-50'
+                          isDarkTheme ? 'border-white/10 bg-black/15' : 'border-slate-200 bg-slate-50'
                         ].join(' ')}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setRankingActiveSellerId((current) => (current === seller.id ? null : seller.id))}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-400 text-xs font-black text-slate-900"
-                          >
-                            {index + 1}
-                          </button>
+                          <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{seller.name}</p>
                           <button
                             type="button"
                             onClick={() => toggleSellerEnabled(seller.id)}
@@ -2652,19 +2689,32 @@ const Dashboard = () => {
                             {isDisabled ? 'Desabilitado' : 'Habilitado'}
                           </button>
                         </div>
-
-                        <p className={['mt-2 text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{seller.name}</p>
                         <div className="mt-1 flex items-center justify-between text-xs">
                           <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>Vendas</span>
                           <span className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{formatCurrency(seller.salesVolume)}</span>
                         </div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>Leads</span>
-                          <span className={isDarkTheme ? 'text-slate-300' : 'text-slate-700'}>{seller.leadsCount}</span>
-                        </div>
                       </div>
                     );
                   })}
+                </div>
+
+                <div className={['mt-4 rounded-lg border p-3', isDarkTheme ? 'border-white/10 bg-black/10' : 'border-slate-200 bg-white'].join(' ')}>
+                  <h4 className={['text-xs font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Historico de vendas</h4>
+                  <div className="mt-2 max-h-72 space-y-2 overflow-y-auto">
+                    {(salesAnalysis?.recentSales || []).length ? (
+                      (salesAnalysis?.recentSales || []).map((sale) => (
+                        <article key={sale.id} className={['rounded-md border px-2 py-1.5 text-xs', isDarkTheme ? 'border-white/10 bg-slate-900/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={isDarkTheme ? 'text-slate-300' : 'text-slate-600'}>#{sale.id.slice(0, 8)}</span>
+                            <strong className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{formatCurrency(Number(sale.total || 0))}</strong>
+                          </div>
+                          <p className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>{formatDateTime(sale.createdAt)}</p>
+                        </article>
+                      ))
+                    ) : (
+                      <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Nenhuma venda registrada ainda.</p>
+                    )}
+                  </div>
                 </div>
               </aside>
             </div>
@@ -3406,7 +3456,9 @@ const Dashboard = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={fetchSalesAnalysis}
+                      onClick={() => {
+                        void fetchSalesAnalysis();
+                      }}
                       disabled={salesLoading}
                       className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-100 disabled:opacity-70"
                     >
