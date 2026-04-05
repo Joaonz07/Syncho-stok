@@ -1106,6 +1106,7 @@ router.post('/products', requireAuth, async (req, res) => {
   const code = String(req.body?.code || '').trim() || `PRD-${Date.now().toString().slice(-6)}`;
   const price = Number(req.body?.price || 0);
   const description = String(req.body?.description || '').trim();
+  const quantity = Math.floor(Number(req.body?.quantity ?? 0));
   const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
 
   if (!name || !Number.isFinite(price)) {
@@ -1114,6 +1115,10 @@ router.post('/products', requireAuth, async (req, res) => {
 
   if (!companyId) {
     return res.status(400).json({ message: 'companyId e obrigatorio para cadastrar produto.' });
+  }
+
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    return res.status(400).json({ message: 'quantity deve ser um numero inteiro maior ou igual a zero.' });
   }
 
   const subscription = await getCompanySubscription(companyId);
@@ -1145,28 +1150,43 @@ router.post('/products', requireAuth, async (req, res) => {
   let lastError: string | null = null;
 
   for (const companyField of companyFieldAliases) {
-    const payload = {
-      name,
-      code,
-      price,
-      description,
-      [companyField]: companyId
-    };
+    const payloadCandidates: Array<Record<string, unknown>> = [
+      {
+        name,
+        code,
+        price,
+        description,
+        [companyField]: companyId
+      },
+      {
+        name,
+        price,
+        description,
+        [companyField]: companyId
+      },
+      {
+        name,
+        price,
+        [companyField]: companyId
+      }
+    ];
 
-    const response = await insertWithAliases('products', payload);
+    for (const payload of payloadCandidates) {
+      const response = await insertWithAliases('products', payload);
 
-    if (!response.error) {
-      const createdProduct = response.data as Record<string, unknown>;
-      const createdProductId = String(createdProduct?.id || '').trim();
+      if (!response.error) {
+        const createdProduct = response.data as Record<string, unknown>;
+        const createdProductId = String(createdProduct?.id || '').trim();
 
-      if (createdProductId) {
-        await createInventoryRecordWithAliases(createdProductId, companyId, 0);
+        if (createdProductId) {
+          await createInventoryRecordWithAliases(createdProductId, companyId, quantity);
+        }
+
+        return res.status(201).json({ message: 'Produto criado com sucesso.', product: response.data });
       }
 
-      return res.status(201).json({ message: 'Produto criado com sucesso.', product: response.data });
+      lastError = response.error.message;
     }
-
-    lastError = response.error.message;
   }
 
   return res.status(400).json({ message: lastError || 'Falha ao criar produto.' });

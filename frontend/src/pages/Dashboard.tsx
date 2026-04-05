@@ -730,6 +730,7 @@ const Dashboard = () => {
   const [showProductCreateModal, setShowProductCreateModal] = useState(false);
   const [productName, setProductName] = useState('');
   const [productPrice, setProductPrice] = useState('');
+  const [productQuantity, setProductQuantity] = useState('0');
   const [productDescription, setProductDescription] = useState('');
   const [productCompanyId, setProductCompanyId] = useState('');
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -2955,6 +2956,13 @@ const Dashboard = () => {
       return;
     }
 
+    const initialQuantity = Math.max(0, Math.floor(Number(productQuantity || 0)));
+
+    if (!Number.isFinite(initialQuantity)) {
+      setStatus('Informe uma quantidade inicial valida para estoque.');
+      return;
+    }
+
     setProductsLoading(true);
 
     try {
@@ -2967,6 +2975,7 @@ const Dashboard = () => {
         body: JSON.stringify({
           name: productName.trim(),
           price: Number(productPrice || 0),
+          quantity: initialQuantity,
           description: productDescription.trim(),
           companyId: targetCompanyId
         })
@@ -2985,6 +2994,7 @@ const Dashboard = () => {
 
       setProductName('');
       setProductPrice('');
+      setProductQuantity('0');
       setProductDescription('');
       setShowProductCreateModal(false);
       setStatus('Produto criado com sucesso.');
@@ -4977,7 +4987,30 @@ const Dashboard = () => {
                     <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>Preencha apenas os dados de cadastro do produto.</p>
                     <div className="mt-4 grid gap-3">
                       <input className={themedInputClass} placeholder="Nome" value={productName} onChange={(event) => setProductName(event.target.value)} />
-                      <input className={themedInputClass} placeholder="Preco" type="number" step="0.01" value={productPrice} onChange={(event) => setProductPrice(event.target.value)} />
+                      <div className={[
+                        'flex items-center rounded-xl border px-3 py-2 text-sm',
+                        isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800'
+                      ].join(' ')}>
+                        <span className={isDarkTheme ? 'mr-2 text-slate-400' : 'mr-2 text-slate-500'}>R$</span>
+                        <input
+                          className="w-full bg-transparent outline-none"
+                          placeholder="0,00"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={productPrice}
+                          onChange={(event) => setProductPrice(event.target.value)}
+                        />
+                      </div>
+                      <input
+                        className={themedInputClass}
+                        placeholder="Quantidade inicial em estoque"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={productQuantity}
+                        onChange={(event) => setProductQuantity(event.target.value)}
+                      />
                       <textarea className={themedInputClass} placeholder="Descricao" value={productDescription} onChange={(event) => setProductDescription(event.target.value)} rows={4} />
                     </div>
                     <div className="mt-4 flex gap-2">
