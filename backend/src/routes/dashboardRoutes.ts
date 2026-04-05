@@ -1337,6 +1337,26 @@ router.patch('/subscribe', requireAuth, async (req, res) => {
   return res.status(200).json({ message: 'Assinatura atualizada com sucesso.', company: updated.data });
 });
 
+router.patch('/profile/password', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const newPassword = String(req.body?.newPassword || '').trim();
+
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ message: 'A nova senha deve ter ao menos 6 caracteres.' });
+  }
+
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(req.authUser.id, { password: newPassword });
+
+  if (error) {
+    return res.status(400).json({ message: error.message || 'Falha ao alterar senha.' });
+  }
+
+  return res.status(200).json({ message: 'Senha alterada com sucesso.' });
+});
+
 router.get('/company-info', requireAuth, async (req, res) => {
   if (!req.authUser) {
     return res.status(401).json({ message: 'Usuario nao autenticado.' });

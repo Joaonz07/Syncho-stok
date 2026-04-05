@@ -148,7 +148,7 @@ type SalesAnalysis = {
   }>;
 };
 
-type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales';
+type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat';
 
 type SidebarGroup = 'Comercial' | 'Operacao' | 'Sistema';
 
@@ -230,6 +230,22 @@ const getUserIdFromJwt = (jwt: string) => {
     const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const payload = JSON.parse(atob(base64)) as { sub?: string };
     return String(payload.sub || '').trim();
+  } catch (_error) {
+    return '';
+  }
+};
+
+const getUserEmailFromJwt = (jwt: string) => {
+  try {
+    const parts = String(jwt || '').split('.');
+
+    if (parts.length < 2) {
+      return '';
+    }
+
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(base64)) as { email?: string };
+    return String(payload.email || '').trim();
   } catch (_error) {
     return '';
   }
@@ -340,6 +356,7 @@ const Dashboard = () => {
   const token = getAccessToken();
   const currentUserId = useMemo(() => getUserIdFromJwt(token), [token]);
   const displayUserName = useMemo(() => getUserDisplayNameFromJwt(token), [token]);
+  const displayUserEmail = useMemo(() => getUserEmailFromJwt(token), [token]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [activeView, setActiveView] = useState<DashboardView>('pipeline');
@@ -412,6 +429,9 @@ const Dashboard = () => {
   const [settingsPlan, setSettingsPlan] = useState<CompanyPlan>('BASIC');
   const [settingsExpiresAt, setSettingsExpiresAt] = useState('');
   const [settingsCompanyInfo, setSettingsCompanyInfo] = useState<CompanyInfo | null>(null);
+  const [settingsNewPassword, setSettingsNewPassword] = useState('');
+  const [settingsConfirmPassword, setSettingsConfirmPassword] = useState('');
+  const [settingsPasswordLoading, setSettingsPasswordLoading] = useState(false);
   const [supportRequests, setSupportRequests] = useState<SupportRequest[]>([]);
   const [supportLoading, setSupportLoading] = useState(false);
   const [supportSubject, setSupportSubject] = useState('');
@@ -1535,8 +1555,13 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (activeView === 'settings') {
-      setSupportUnreadCount(0);
       void fetchSettings();
+    }
+  }, [activeView, token, companyId, role, settingsCompanyId]);
+
+  useEffect(() => {
+    if (activeView === 'chat') {
+      setSupportUnreadCount(0);
       void fetchSupportRequests();
 
       if (selectedSupportRequestId) {
@@ -1577,7 +1602,7 @@ const Dashboard = () => {
       const isCurrentThread = incoming.requestId && incoming.requestId === selectedSupportRequestId;
 
       if (!isOwnMessage) {
-        if (activeView !== 'settings' || !isCurrentThread) {
+        if (activeView !== 'chat' || !isCurrentThread) {
           setSupportUnreadCount((current) => current + 1);
         }
 
@@ -1671,7 +1696,7 @@ const Dashboard = () => {
   }, [token, activeView, settingsCompanyId, role, companyId, currentUserId, selectedSupportRequestId]);
 
   useEffect(() => {
-    if (activeView !== 'settings') {
+    if (activeView !== 'chat') {
       return;
     }
 
@@ -2262,6 +2287,49 @@ const Dashboard = () => {
     }
   };
 
+  const changePassword = async () => {
+    if (!token) {
+      return;
+    }
+
+    if (!settingsNewPassword.trim() || settingsNewPassword.trim().length < 6) {
+      showToast('A senha deve ter ao menos 6 caracteres');
+      return;
+    }
+
+    if (settingsNewPassword !== settingsConfirmPassword) {
+      showToast('As senhas nao conferem');
+      return;
+    }
+
+    setSettingsPasswordLoading(true);
+
+    try {
+      const response = await fetch('/api/dashboard/profile/password', {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ newPassword: settingsNewPassword.trim() })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        showToast(result.message || 'Falha ao alterar senha');
+        return;
+      }
+
+      setSettingsNewPassword('');
+      setSettingsConfirmPassword('');
+      showToast('Senha alterada com sucesso');
+    } catch (_error) {
+      showToast('Erro de rede ao alterar senha');
+    } finally {
+      setSettingsPasswordLoading(false);
+    }
+  };
+
   const addSaleLine = () => {
     setSaleLines((currentLines) => [
       ...currentLines,
@@ -2640,7 +2708,7 @@ const Dashboard = () => {
     { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
     { name: 'Estoque', icon: Boxes, path: 'inventory', group: 'Operacao' },
     { name: 'Integracoes', icon: Plug, path: 'settings', group: 'Operacao' },
-    { name: 'Chat / Suporte', icon: MessageCircle, path: 'settings', group: 'Sistema' },
+    { name: 'Chat / Suporte', icon: MessageCircle, path: 'chat', group: 'Sistema' },
     { name: 'Planos', icon: CreditCard, path: 'settings', group: 'Sistema', adminOnly: true },
     { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema' }
   ];
@@ -2807,6 +2875,7 @@ const Dashboard = () => {
               { key: 'companies' as const, icon: LayoutDashboard, label: 'Empresas' },
               { key: 'clients' as const, icon: Users, label: 'Clientes' },
             ] : []),
+            { key: 'chat' as const, icon: MessageCircle, label: 'Chat' },
             { key: 'settings' as const, icon: Settings, label: 'Config' },
           ].map(({ key, icon: Icon, label }) => {
             const isActive = activeView === key;
@@ -2825,7 +2894,7 @@ const Dashboard = () => {
               >
                 <Icon className="h-5 w-5" />
                 {label}
-                {key === 'settings' && supportUnreadCount > 0 ? (
+                {key === 'chat' && supportUnreadCount > 0 ? (
                   <span className="absolute -mt-3 ml-4 h-2 w-2 rounded-full bg-rose-500" />
                 ) : null}
               </motion.button>
@@ -3728,304 +3797,502 @@ const Dashboard = () => {
           ) : null}
 
           {activeView === 'settings' ? (
-            <div className="mx-auto grid w-full max-w-5xl gap-8 rounded-3xl border border-white/10 bg-gradient-to-b from-gray-950 to-slate-900 p-6 text-slate-100 shadow-2xl shadow-slate-950/40 transition-all duration-500 md:p-8">
-              <div className="rounded-xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur-md transition-all hover:border-white/20">
-                <h1 className="text-2xl font-semibold text-white">Configuracoes</h1>
-                <p className="mt-1 text-sm text-gray-400">
-                  {role === 'ADMIN'
-                    ? 'Configure plano e vencimento da assinatura da empresa.'
-                    : 'Visualize os dados da sua empresa e da sua assinatura.'}
-                </p>
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="mx-auto w-full max-w-4xl space-y-6"
+            >
+              {/* Header */}
+              <div>
+                <h1 className={['text-2xl font-bold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Configuracoes</h1>
+                <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Gerencie seu perfil, empresa e seguranca</p>
+              </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {role === 'ADMIN' ? (
-                    <select className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30" value={settingsCompanyId} onChange={(event) => setSettingsCompanyId(event.target.value)}>
-                      <option className="bg-slate-900 text-slate-100" value="">Selecione a empresa</option>
-                      {companyOptions.map((option) => (
-                        <option className="bg-slate-900 text-slate-100" key={option.id} value={option.id}>{option.name}</option>
-                      ))}
-                    </select>
-                  ) : null}
+              {/* CARD: Perfil */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.05 }}
+                className={['rounded-2xl border p-6 shadow-sm', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}
+              >
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/20 text-blue-400">
+                    <Users className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className={['text-base font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Perfil do usuario</h2>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Informacoes da sua conta</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-5">
+                  <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-xl font-bold text-white shadow-lg">
+                    {(displayUserName || 'U').slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="grid gap-1 flex-1">
+                    <p className={['text-lg font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{displayUserName || 'Usuario'}</p>
+                    <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{displayUserEmail || 'email@empresa.com'}</p>
+                    <span className={['inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-semibold', role === 'ADMIN' ? 'bg-purple-500/15 text-purple-300' : 'bg-blue-500/15 text-blue-300'].join(' ')}>
+                      {role === 'ADMIN' ? 'Administrador' : 'Cliente'}
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
 
-                  {role === 'ADMIN' ? (
-                    <select className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30" value={settingsPlan} onChange={(event) => setSettingsPlan(event.target.value as CompanyPlan)}>
-                      <option className="bg-slate-900 text-slate-100" value="BASIC">BASIC</option>
-                      <option className="bg-slate-900 text-slate-100" value="PRO">PRO</option>
-                      <option className="bg-slate-900 text-slate-100" value="PREMIUM">PREMIUM</option>
-                    </select>
-                  ) : (
-                    <input className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200" value={settingsSubscription?.plan || '-'} readOnly />
-                  )}
-
-                  {role === 'ADMIN' ? (
-                    <input className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30" type="date" value={settingsExpiresAt} onChange={(event) => setSettingsExpiresAt(event.target.value)} />
-                  ) : (
-                    <input className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200" value={settingsSubscription?.expiresAt ? String(settingsSubscription.expiresAt).slice(0, 10) : '-'} readOnly />
-                  )}
-
-                  <button type="button" onClick={fetchSettings} disabled={settingsLoading} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:opacity-70">
-                    {settingsLoading ? 'Carregando...' : 'Atualizar dados'}
-                  </button>
+              {/* CARD: Empresa */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.1 }}
+                className={['rounded-2xl border p-6 shadow-sm', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}
+              >
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
+                    <BarChart3 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className={['text-base font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Empresa</h2>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Dados da sua empresa e plano</p>
+                  </div>
                 </div>
 
                 {role === 'ADMIN' ? (
-                  <button type="button" onClick={saveSettings} disabled={settingsLoading} className="mt-4 rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-white/20 disabled:opacity-70">
-                    Salvar configuracoes
-                  </button>
-                ) : null}
-
-                <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-5 text-sm text-slate-300 shadow-lg backdrop-blur-md transition-all hover:border-white/20">
-                  <h2 className="mb-3 text-xl font-semibold text-white">Resumo da conta</h2>
-                  <p>Empresa: <strong className="text-white">{settingsCompanyInfo?.name || '-'}</strong></p>
-                  <p>Localizacao: <strong className="text-white">{settingsCompanyInfo?.location || 'Nao informada'}</strong></p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-blue-400/30 bg-blue-500/15 px-3 py-1 text-xs font-semibold text-blue-200">
-                      Plano: {settingsSubscription?.plan || '-'}
-                    </span>
-                    <span
-                      className={[
-                        'rounded-full border px-3 py-1 text-xs font-semibold',
-                        settingsSubscription?.status === 'ACTIVE'
-                          ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-200'
-                          : 'border-amber-400/30 bg-amber-500/15 text-amber-200'
-                      ].join(' ')}
+                  <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                    <select
+                      className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
+                      value={settingsCompanyId}
+                      onChange={(event) => setSettingsCompanyId(event.target.value)}
                     >
-                      Status: {settingsSubscription?.status || '-'}
-                    </span>
-                  </div>
-                  <p className="mt-3">Expira em: <strong className="text-white">{settingsSubscription?.expiresAt ? String(settingsSubscription.expiresAt).slice(0, 10) : '-'}</strong></p>
-                  <p>Validade de acesso: <strong className="text-white">{settingsAccessUntil ? String(settingsAccessUntil).slice(0, 10) : 'Sem limite'}</strong></p>
-                </div>
-
-                {role !== 'ADMIN' ? (
-                  <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur-md transition-all hover:border-white/20">
-                    <h2 className="text-xl font-semibold text-white">Chamar suporte</h2>
-                    <p className="mt-1 text-sm text-gray-400">
-                      Escreva o que deseja alterar. O pedido vai direto para o admin da plataforma.
-                    </p>
-                    <div className="mt-4 grid gap-3">
-                      <input
-                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-                        placeholder="Assunto (ex: Mudanca no plano, ajuste de conta)"
-                        value={supportSubject}
-                        onChange={(event) => setSupportSubject(event.target.value)}
-                      />
-                      <textarea
-                        className="min-h-[100px] rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-                        placeholder="Explique o que voce quer mudar"
-                        value={supportMessage}
-                        onChange={(event) => setSupportMessage(event.target.value)}
-                      />
-                      <button
-                        type="button"
-                        onClick={createSupportRequest}
-                        disabled={supportLoading}
-                        className="w-fit rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 text-sm font-semibold text-white transition-all hover:scale-105 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-70"
+                      <option value="">Selecione a empresa</option>
+                      {companyOptions.map((option) => (
+                        <option key={option.id} value={option.id}>{option.name}</option>
+                      ))}
+                    </select>
+                    <div className="flex gap-2">
+                      <select
+                        className={['flex-1 rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
+                        value={settingsPlan}
+                        onChange={(event) => setSettingsPlan(event.target.value as CompanyPlan)}
                       >
-                        {supportLoading ? 'Enviando...' : 'Enviar para suporte'}
-                      </button>
+                        <option value="BASIC">BASIC</option>
+                        <option value="PRO">PRO</option>
+                        <option value="PREMIUM">PREMIUM</option>
+                      </select>
+                      <input
+                        type="date"
+                        className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
+                        value={settingsExpiresAt}
+                        onChange={(event) => setSettingsExpiresAt(event.target.value)}
+                      />
                     </div>
                   </div>
                 ) : null}
 
-                <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur-md transition-all hover:border-white/20">
-                  <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-xl font-semibold text-white">
-                      {role === 'ADMIN' ? 'Solicitacoes de suporte dos clientes' : 'Minhas solicitacoes'}
-                    </h2>
+                {settingsCompanyInfo ? (
+                  <div className={['rounded-xl border p-4 text-sm', isDarkTheme ? 'border-white/8 bg-black/20' : 'border-slate-100 bg-slate-50'].join(' ')}>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Nome da empresa</p>
+                        <p className={['mt-1 font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{settingsCompanyInfo.name || '-'}</p>
+                      </div>
+                      <div>
+                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Localizacao</p>
+                        <p className={['mt-1 font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{settingsCompanyInfo.location || 'Nao informada'}</p>
+                      </div>
+                      <div>
+                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Plano</p>
+                        <span className="mt-1 inline-flex rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-semibold text-blue-300">{settingsSubscription?.plan || '-'}</span>
+                      </div>
+                      <div>
+                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Status</p>
+                        <span className={['mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold', settingsSubscription?.status === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'].join(' ')}>
+                          {settingsSubscription?.status || '-'}
+                        </span>
+                      </div>
+                      <div>
+                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Expira em</p>
+                        <p className={['mt-1 font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{settingsSubscription?.expiresAt ? String(settingsSubscription.expiresAt).slice(0, 10) : 'Sem limite'}</p>
+                      </div>
+                      <div>
+                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Acesso ate</p>
+                        <p className={['mt-1 font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{settingsAccessUntil ? String(settingsAccessUntil).slice(0, 10) : 'Sem limite'}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                    {settingsLoading ? 'Carregando...' : 'Clique em "Carregar dados" para ver as informacoes da empresa.'}
+                  </p>
+                )}
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={fetchSettings}
+                    disabled={settingsLoading}
+                    className={['rounded-xl px-4 py-2 text-sm font-semibold transition-all disabled:opacity-70', isDarkTheme ? 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10' : 'border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'].join(' ')}
+                  >
+                    {settingsLoading ? 'Carregando...' : 'Carregar dados'}
+                  </button>
+                  {role === 'ADMIN' ? (
                     <button
                       type="button"
-                      onClick={fetchSupportRequests}
-                      disabled={supportLoading}
-                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:bg-white/10 disabled:opacity-70"
+                      onClick={saveSettings}
+                      disabled={settingsLoading}
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:opacity-70"
                     >
-                      Atualizar
+                      Salvar configuracoes
                     </button>
+                  ) : null}
+                </div>
+              </motion.div>
+
+              {/* CARD: Seguranca */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.15 }}
+                className={['rounded-2xl border p-6 shadow-sm', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}
+              >
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/20 text-rose-400">
+                    <Settings className="h-5 w-5" />
                   </div>
-
-                  <div className="mt-3 grid gap-3">
-                    {supportRequests.length ? (
-                      supportRequests.map((request) => {
-                        const draft = supportDrafts[request.id] || {
-                          status: request.status,
-                          adminResponse: request.adminResponse || ''
-                        };
-
-                        return (
-                          <article key={request.id} className="rounded-xl border border-white/10 bg-white/5 p-3 transition-all hover:border-white/20 hover:bg-white/10">
-                            <p className="text-sm font-semibold text-white">{request.subject || 'Solicitacao sem assunto'}</p>
-                            <p className="mt-1 text-sm text-slate-300">{request.message}</p>
-                            <p className="mt-2 text-xs text-gray-400">
-                              {role === 'ADMIN'
-                                ? `Cliente: ${request.requesterName || request.requesterEmail || request.requesterId} | Empresa: ${request.companyId}`
-                                : `Aberto em: ${request.createdAt ? String(request.createdAt).slice(0, 10) : '-'}`}
-                            </p>
-
-                            {role === 'ADMIN' ? (
-                              <div className="mt-3 grid gap-2 md:grid-cols-[170px_1fr_auto]">
-                                <select
-                                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-                                  value={draft.status}
-                                  onChange={(event) =>
-                                    setSupportDrafts((current) => ({
-                                      ...current,
-                                      [request.id]: {
-                                        ...draft,
-                                        status: event.target.value as SupportRequestStatus
-                                      }
-                                    }))
-                                  }
-                                >
-                                  <option className="bg-slate-900 text-slate-100" value="PENDING">PENDING</option>
-                                  <option className="bg-slate-900 text-slate-100" value="IN_REVIEW">IN_REVIEW</option>
-                                  <option className="bg-slate-900 text-slate-100" value="DONE">DONE</option>
-                                </select>
-                                <input
-                                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-                                  placeholder="Resposta do admin"
-                                  value={draft.adminResponse}
-                                  onChange={(event) =>
-                                    setSupportDrafts((current) => ({
-                                      ...current,
-                                      [request.id]: {
-                                        ...draft,
-                                        adminResponse: event.target.value
-                                      }
-                                    }))
-                                  }
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => void saveSupportRequestByAdmin(request.id, request.companyId)}
-                                  disabled={supportLoading}
-                                  className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:opacity-70"
-                                >
-                                  Salvar
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="mt-2 text-xs text-slate-300">
-                                <p>Status: <strong className="text-white">{request.status}</strong></p>
-                                <p>Resposta do admin: <strong className="text-white">{request.adminResponse || 'Aguardando retorno'}</strong></p>
-                              </div>
-                            )}
-
-                            <div className="mt-3 flex items-center justify-between gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (selectedSupportRequestId === request.id) {
-                                    setSelectedSupportRequestId(null);
-                                    setSupportChatMessages([]);
-                                    setSupportTypingText('');
-                                    setSupportChatText('');
-                                    return;
-                                  }
-
-                                  setSelectedSupportRequestId(request.id);
-                                  setSupportChatMessages([]);
-                                  void fetchSupportChatMessages(request.id);
-                                }}
-                                className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:bg-white/10"
-                              >
-                                {selectedSupportRequestId === request.id ? 'Fechar chat' : 'Abrir chat'}
-                              </button>
-                              {selectedSupportRequestId === request.id ? (
-                                <div className="flex items-center gap-2 text-xs">
-                                  <span className={[
-                                    'inline-flex h-2.5 w-2.5 rounded-full',
-                                    supportAdminOnline ? 'bg-emerald-400' : 'bg-slate-500'
-                                  ].join(' ')} />
-                                  <span className="text-slate-300">
-                                    {supportAdminOnline ? 'Suporte online' : 'Suporte offline'}
-                                  </span>
-                                  <span className="text-slate-500">|</span>
-                                  <span className="text-slate-300">{supportChatConnected ? 'Conectado' : 'Desconectado'}</span>
-                                </div>
-                              ) : null}
-                            </div>
-
-                            {selectedSupportRequestId === request.id ? (
-                              <div className="mt-3 rounded-xl border border-white/10 bg-black/10 p-3">
-                                <div className="max-h-72 space-y-2 overflow-y-auto">
-                                  {supportChatMessages.length ? (
-                                    supportChatMessages.map((message) => {
-                                      const isMine = message.senderId === currentUserId;
-
-                                      return (
-                                        <div
-                                          key={message.id}
-                                          className={[
-                                            'max-w-[85%] rounded-xl px-3 py-2 text-sm',
-                                            isMine
-                                              ? 'ml-auto bg-blue-600/80 text-white'
-                                              : 'mr-auto bg-slate-700/70 text-slate-100'
-                                          ].join(' ')}
-                                        >
-                                          <p className="text-[11px] opacity-80">{message.senderName} ({message.senderRole})</p>
-                                          <p className="mt-1 whitespace-pre-wrap">{message.content}</p>
-                                          <p className="mt-1 text-[10px] opacity-70">{String(message.createdAt || '').slice(0, 16).replace('T', ' ')}</p>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <p className="text-sm text-slate-400">Nenhuma mensagem neste chamado ainda.</p>
-                                  )}
-                                </div>
-
-                                <p className="mt-2 min-h-[20px] text-xs text-cyan-300">{supportTypingText || ' '}</p>
-
-                                {request.status === 'DONE' ? (
-                                  <div className="mt-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-xs text-emerald-300">
-                                    Chamado finalizado. Para continuar, abra uma nova solicitacao de suporte.
-                                  </div>
-                                ) : (
-                                  <div className="mt-1 grid gap-2 md:grid-cols-[1fr_auto]">
-                                    <input
-                                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-                                      placeholder="Digite sua mensagem"
-                                      value={supportChatText}
-                                      onChange={(event) => {
-                                        setSupportChatText(event.target.value);
-                                        emitSupportTyping(event.target.value.trim().length > 0);
-                                      }}
-                                      onBlur={() => emitSupportTyping(false)}
-                                      onKeyDown={(event) => {
-                                        if (event.key === 'Enter' && !event.shiftKey) {
-                                          event.preventDefault();
-                                          void sendSupportChatMessage();
-                                          emitSupportTyping(false);
-                                        }
-                                      }}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void sendSupportChatMessage();
-                                        emitSupportTyping(false);
-                                      }}
-                                      className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 px-4 py-2 text-sm font-semibold text-white transition-all hover:scale-105 hover:from-indigo-500 hover:to-blue-400"
-                                    >
-                                      Enviar
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            ) : null}
-                          </article>
-                        );
-                      })
-                    ) : (
-                      <p className="rounded-xl border border-dashed border-white/15 bg-white/5 px-4 py-6 text-center text-sm text-gray-400">
-                        {supportLoading
-                          ? 'Carregando solicitacoes...'
-                          : 'Nenhuma solicitacao no momento. Quando houver novidades, elas aparecerao aqui.'}
-                      </p>
-                    )}
+                  <div>
+                    <h2 className={['text-base font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Seguranca</h2>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Altere sua senha de acesso</p>
                   </div>
                 </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <input
+                    type="password"
+                    placeholder="Nova senha"
+                    className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
+                    value={settingsNewPassword}
+                    onChange={(event) => setSettingsNewPassword(event.target.value)}
+                  />
+                  <input
+                    type="password"
+                    placeholder="Confirmar nova senha"
+                    className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
+                    value={settingsConfirmPassword}
+                    onChange={(event) => setSettingsConfirmPassword(event.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={changePassword}
+                  disabled={settingsPasswordLoading || !settingsNewPassword || !settingsConfirmPassword}
+                  className="mt-4 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-rose-700 disabled:opacity-60"
+                >
+                  {settingsPasswordLoading ? 'Alterando...' : 'Alterar senha'}
+                </button>
+              </motion.div>
+
+              {/* CARD: Preferencias */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.2 }}
+                className={['rounded-2xl border p-6 shadow-sm', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}
+              >
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-yellow-500/20 text-yellow-400">
+                    <TrendingUp className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className={['text-base font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Preferencias</h2>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Aparencia e configuracoes visuais</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={['text-sm font-medium', isDarkTheme ? 'text-slate-200' : 'text-slate-700'].join(' ')}>Tema da interface</p>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Escolha entre modo claro e escuro</p>
+                  </div>
+                  <div className={['flex items-center gap-1 rounded-xl border px-1 py-1 text-xs', isDarkTheme ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-100'].join(' ')}>
+                    <button
+                      type="button"
+                      onClick={() => setUiTheme('light')}
+                      className={['rounded-lg px-3 py-1.5 text-xs font-semibold transition-all', uiTheme === 'light' ? 'bg-blue-600 text-white shadow' : isDarkTheme ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'].join(' ')}
+                    >
+                      Claro
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUiTheme('dark')}
+                      className={['rounded-lg px-3 py-1.5 text-xs font-semibold transition-all', uiTheme === 'dark' ? 'bg-cyan-500 text-slate-900 shadow' : isDarkTheme ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'].join(' ')}
+                    >
+                      Escuro
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          ) : null}
+
+          {activeView === 'chat' ? (
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="mx-auto w-full max-w-5xl"
+            >
+              {/* Header */}
+              <div className="mb-5">
+                <h1 className={['text-2xl font-bold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Chat / Suporte</h1>
+                <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                  {role === 'ADMIN' ? 'Gerencie as solicitacoes de suporte dos clientes' : 'Envie mensagens e acompanhe seu suporte'}
+                </p>
               </div>
-            </div>
+
+              {/* Admin: select empresa */}
+              {role === 'ADMIN' ? (
+                <div className="mb-5 flex gap-3">
+                  <select
+                    className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-white text-slate-800 focus:border-blue-400'].join(' ')}
+                    value={settingsCompanyId}
+                    onChange={(event) => setSettingsCompanyId(event.target.value)}
+                  >
+                    <option value="">Todas as empresas</option>
+                    {companyOptions.map((option) => (
+                      <option key={option.id} value={option.id}>{option.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={fetchSupportRequests}
+                    disabled={supportLoading}
+                    className={['rounded-xl border px-4 py-2 text-sm font-semibold transition-all disabled:opacity-70', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-200 hover:bg-white/10' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'].join(' ')}
+                  >
+                    {supportLoading ? 'Atualizando...' : 'Atualizar'}
+                  </button>
+                </div>
+              ) : null}
+
+              <div className={['grid gap-5', selectedSupportRequestId ? 'lg:grid-cols-[360px_1fr]' : ''].join(' ')}>
+                {/* Painel esquerdo: lista de chamados + novo chamado */}
+                <div className="space-y-4">
+                  {/* Novo chamado (apenas CLIENT) */}
+                  {role !== 'ADMIN' ? (
+                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}>
+                      <h3 className={['text-sm font-semibold mb-3', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Abrir novo chamado</h3>
+                      <div className="space-y-3">
+                        <input
+                          className={['w-full rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400'].join(' ')}
+                          placeholder="Assunto (ex: alteracao de plano)"
+                          value={supportSubject}
+                          onChange={(event) => setSupportSubject(event.target.value)}
+                        />
+                        <textarea
+                          className={['w-full min-h-[80px] rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2 resize-none', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400'].join(' ')}
+                          placeholder="Descreva o que precisa de suporte..."
+                          value={supportMessage}
+                          onChange={(event) => setSupportMessage(event.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={createSupportRequest}
+                          disabled={supportLoading}
+                          className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 py-2 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
+                        >
+                          {supportLoading ? 'Enviando...' : 'Enviar chamado'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Lista de chamados */}
+                  <div className={['rounded-2xl border', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}>
+                    <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                      <h3 className={['text-sm font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>
+                        {role === 'ADMIN' ? 'Chamados dos clientes' : 'Meus chamados'}
+                      </h3>
+                      <span className={['rounded-full px-2 py-0.5 text-xs font-bold', isDarkTheme ? 'bg-white/10 text-slate-300' : 'bg-slate-100 text-slate-600'].join(' ')}>
+                        {supportRequests.length}
+                      </span>
+                    </div>
+                    <div className="divide-y divide-white/5 pb-2">
+                      {supportRequests.length ? (
+                        supportRequests.map((request) => {
+                          const isSelected = selectedSupportRequestId === request.id;
+                          const isDone = request.status === 'DONE';
+
+                          return (
+                            <button
+                              key={request.id}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedSupportRequestId(null);
+                                  setSupportChatMessages([]);
+                                  setSupportTypingText('');
+                                  setSupportChatText('');
+                                  return;
+                                }
+                                setSelectedSupportRequestId(request.id);
+                                setSupportChatMessages([]);
+                                void fetchSupportChatMessages(request.id);
+                              }}
+                              className={['w-full px-5 py-3 text-left transition-all', isSelected ? isDarkTheme ? 'bg-blue-500/15' : 'bg-blue-50' : isDarkTheme ? 'hover:bg-white/5' : 'hover:bg-slate-50'].join(' ')}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className={['text-sm font-medium truncate', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{request.subject || 'Chamado sem assunto'}</p>
+                                <span className={['flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold', isDone ? 'bg-emerald-500/15 text-emerald-300' : request.status === 'IN_REVIEW' ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-500/30 text-slate-300'].join(' ')}>
+                                  {isDone ? 'Concluido' : request.status === 'IN_REVIEW' ? 'Em analise' : 'Pendente'}
+                                </span>
+                              </div>
+                              <p className={['mt-0.5 text-xs truncate', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                                {role === 'ADMIN'
+                                  ? (request.requesterName || request.requesterEmail || 'Cliente')
+                                  : String(request.createdAt || '').slice(0, 10)}
+                              </p>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p className={['px-5 py-6 text-center text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                          {supportLoading ? 'Carregando...' : 'Nenhum chamado no momento.'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Painel direito: chat */}
+                {selectedSupportRequestId ? (() => {
+                  const selectedRequest = supportRequests.find((r) => r.id === selectedSupportRequestId);
+
+                  return (
+                    <div className={['flex flex-col rounded-2xl border overflow-hidden', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')} style={{ maxHeight: '640px' }}>
+                      {/* Chat header */}
+                      <div className={['flex items-center justify-between px-5 py-4 border-b', isDarkTheme ? 'border-white/10' : 'border-slate-100'].join(' ')}>
+                        <div>
+                          <p className={['text-sm font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{selectedRequest?.subject || 'Chamado'}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className={['inline-flex h-2 w-2 rounded-full', supportAdminOnline ? 'bg-emerald-400' : 'bg-slate-500'].join(' ')} />
+                            <span className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                              {supportAdminOnline ? 'Suporte online' : 'Suporte offline'} · {supportChatConnected ? 'conectado' : 'desconectado'}
+                            </span>
+                          </div>
+                        </div>
+                        {role === 'ADMIN' && selectedRequest ? (
+                          <div className="flex items-center gap-2">
+                            <select
+                              className={['rounded-xl border px-2 py-1 text-xs outline-none transition-all', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800'].join(' ')}
+                              value={supportDrafts[selectedRequest.id]?.status || selectedRequest.status}
+                              onChange={(event) =>
+                                setSupportDrafts((current) => ({
+                                  ...current,
+                                  [selectedRequest.id]: {
+                                    ...(current[selectedRequest.id] || { status: selectedRequest.status, adminResponse: selectedRequest.adminResponse || '' }),
+                                    status: event.target.value as SupportRequestStatus
+                                  }
+                                }))
+                              }
+                            >
+                              <option value="PENDING">Pendente</option>
+                              <option value="IN_REVIEW">Em analise</option>
+                              <option value="DONE">Concluido</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => void saveSupportRequestByAdmin(selectedRequest.id, selectedRequest.companyId)}
+                              disabled={supportLoading}
+                              className="rounded-xl bg-blue-600 px-3 py-1 text-xs font-semibold text-white transition-all hover:bg-blue-700 disabled:opacity-70"
+                            >
+                              Salvar
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* Mensagens */}
+                      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+                        <AnimatePresence>
+                          {supportChatMessages.length ? (
+                            supportChatMessages.map((message) => {
+                              const isMine = message.senderId === currentUserId;
+
+                              return (
+                                <motion.div
+                                  key={message.id}
+                                  initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                                  className={['flex', isMine ? 'justify-end' : 'justify-start'].join(' ')}
+                                >
+                                  <div className={['max-w-[78%] rounded-2xl px-4 py-2.5 shadow-sm', isMine ? 'rounded-br-md bg-blue-600 text-white' : isDarkTheme ? 'rounded-bl-md bg-slate-700/70 text-slate-100' : 'rounded-bl-md bg-slate-100 text-slate-800'].join(' ')}>
+                                    <p className={['text-[11px] font-semibold mb-0.5 opacity-80', isMine ? 'text-blue-100' : isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                                      {message.senderName} · {message.senderRole === 'ADMIN' ? 'Suporte' : 'Cliente'}
+                                    </p>
+                                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                                    <p className={['mt-1 text-[10px] opacity-60 text-right', isMine ? 'text-blue-200' : ''].join(' ')}>{String(message.createdAt || '').slice(11, 16)}</p>
+                                  </div>
+                                </motion.div>
+                              );
+                            })
+                          ) : (
+                            <div className="flex h-full items-center justify-center">
+                              <p className={['text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Nenhuma mensagem ainda. Inicie a conversa!</p>
+                            </div>
+                          )}
+                        </AnimatePresence>
+                        {supportTypingText ? (
+                          <p className="text-xs text-cyan-400 px-1">{supportTypingText}</p>
+                        ) : null}
+                      </div>
+
+                      {/* Input */}
+                      <div className={['px-4 py-3 border-t', isDarkTheme ? 'border-white/10' : 'border-slate-100'].join(' ')}>
+                        {selectedRequest?.status === 'DONE' ? (
+                          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-xs text-emerald-300">
+                            Chamado finalizado. Para continuar, abra um novo chamado.
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <input
+                              className={['flex-1 rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400'].join(' ')}
+                              placeholder="Digite sua mensagem..."
+                              value={supportChatText}
+                              onChange={(event) => {
+                                setSupportChatText(event.target.value);
+                                emitSupportTyping(event.target.value.trim().length > 0);
+                              }}
+                              onBlur={() => emitSupportTyping(false)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' && !event.shiftKey) {
+                                  event.preventDefault();
+                                  void sendSupportChatMessage();
+                                  emitSupportTyping(false);
+                                }
+                              }}
+                            />
+                            <motion.button
+                              type="button"
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={() => {
+                                void sendSupportChatMessage();
+                                emitSupportTyping(false);
+                              }}
+                              className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:opacity-90"
+                            >
+                              Enviar
+                            </motion.button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })() : (
+                  <div className={['hidden lg:flex flex-col items-center justify-center rounded-2xl border py-16', isDarkTheme ? 'border-white/10 bg-white/5 border-dashed' : 'border-slate-200 border-dashed bg-slate-50'].join(' ')}>
+                    <MessageCircle className={['h-12 w-12 mb-3', isDarkTheme ? 'text-slate-600' : 'text-slate-300'].join(' ')} />
+                    <p className={['text-sm font-medium', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Selecione um chamado para abrir o chat</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
           ) : null}
 
           {activeView === 'sales' ? (
@@ -4475,7 +4742,7 @@ const Dashboard = () => {
             </div>
           ) : null}
 
-          {role === 'ADMIN' || activeView === 'products' || activeView === 'inventory' || activeView === 'settings' || activeView === 'sales' ? (
+          {role === 'ADMIN' || activeView === 'products' || activeView === 'inventory' || activeView === 'settings' || activeView === 'chat' || activeView === 'sales' ? (
             <p className={['mt-4 text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>{adminLoading ? 'Sincronizando área administrativa...' : status}</p>
           ) : null}
 
