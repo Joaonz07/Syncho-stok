@@ -137,6 +137,35 @@ const columns: Array<{ key: LeadStatus; label: string }> = [
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
+const buildSvgPoints = (values: number[], width: number, height: number, padding = 20) => {
+  if (!values.length) {
+    return {
+      polyline: '',
+      areaPath: ''
+    };
+  }
+
+  const max = Math.max(1, ...values);
+  const stepX = values.length > 1 ? (width - padding * 2) / (values.length - 1) : 0;
+
+  const coordinates = values.map((value, index) => {
+    const x = padding + stepX * index;
+    const y = height - padding - (value / max) * (height - padding * 2);
+    return { x, y };
+  });
+
+  const polyline = coordinates.map((point) => `${point.x},${point.y}`).join(' ');
+
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+  const areaPath = `M ${first.x} ${height - padding} L ${polyline.replace(/,/g, ' ')} L ${last.x} ${height - padding} Z`;
+
+  return {
+    polyline,
+    areaPath
+  };
+};
+
 const sortByPosition = (items: Lead[]) =>
   [...items].sort((left, right) => Number(left.position || 0) - Number(right.position || 0));
 
@@ -410,6 +439,11 @@ const Dashboard = () => {
     () => Math.max(1, ...salesKpiChartData.map((item) => item.value)),
     [salesKpiChartData]
   );
+
+  const salesTrendChart = useMemo(() => {
+    const values = salesKpiChartData.map((item) => Number(item.value || 0));
+    return buildSvgPoints(values, 520, 210, 24);
+  }, [salesKpiChartData]);
 
   const fetchAdminData = async () => {
     if (role !== 'ADMIN' || !token) {
@@ -2991,6 +3025,97 @@ const Dashboard = () => {
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+                  <div className={['rounded-xl p-4 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Tendencia dos indicadores</h3>
+                    <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Curva comparativa entre os principais sinais do negocio.
+                    </p>
+
+                    <div className="mt-3 overflow-hidden rounded-lg border border-white/10 bg-black/10 p-2">
+                      <svg viewBox="0 0 520 210" className="h-56 w-full" role="img" aria-label="Grafico de tendencia dos indicadores">
+                        <line x1="24" y1="24" x2="24" y2="186" stroke={isDarkTheme ? '#334155' : '#cbd5e1'} strokeWidth="1" />
+                        <line x1="24" y1="186" x2="496" y2="186" stroke={isDarkTheme ? '#334155' : '#cbd5e1'} strokeWidth="1" />
+                        <line x1="24" y1="146" x2="496" y2="146" stroke={isDarkTheme ? '#1e293b' : '#e2e8f0'} strokeWidth="1" strokeDasharray="4 4" />
+                        <line x1="24" y1="106" x2="496" y2="106" stroke={isDarkTheme ? '#1e293b' : '#e2e8f0'} strokeWidth="1" strokeDasharray="4 4" />
+                        <line x1="24" y1="66" x2="496" y2="66" stroke={isDarkTheme ? '#1e293b' : '#e2e8f0'} strokeWidth="1" strokeDasharray="4 4" />
+
+                        {salesTrendChart.areaPath ? (
+                          <path d={salesTrendChart.areaPath} fill={isDarkTheme ? 'rgba(34,211,238,0.16)' : 'rgba(14,165,233,0.14)'} />
+                        ) : null}
+
+                        {salesTrendChart.polyline ? (
+                          <polyline
+                            points={salesTrendChart.polyline}
+                            fill="none"
+                            stroke={isDarkTheme ? '#22d3ee' : '#0284c7'}
+                            strokeWidth="3"
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                        ) : null}
+
+                        {salesKpiChartData.map((kpi, index) => {
+                          const values = salesKpiChartData.map((item) => Number(item.value || 0));
+                          const max = Math.max(1, ...values);
+                          const stepX = salesKpiChartData.length > 1 ? (520 - 48) / (salesKpiChartData.length - 1) : 0;
+                          const x = 24 + stepX * index;
+                          const y = 186 - (Number(kpi.value || 0) / max) * (210 - 48);
+
+                          return (
+                            <g key={kpi.id}>
+                              <circle cx={x} cy={y} r="5" fill={isDarkTheme ? '#22d3ee' : '#0284c7'} />
+                              <text x={x} y={202} textAnchor="middle" fontSize="10" fill={isDarkTheme ? '#cbd5e1' : '#475569'}>
+                                {kpi.label}
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  </div>
+
+                  <div className={['rounded-xl p-4 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                    <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Colunas por produto</h3>
+                    <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Visual de colunas para destacar rapidamente os itens mais criticos.
+                    </p>
+
+                    <div className={['mt-3 rounded-lg border p-3', isDarkTheme ? 'border-white/10 bg-black/10' : 'border-slate-200 bg-white'].join(' ')}>
+                      <div className="flex h-56 items-end gap-2">
+                        {(lowStockChartData.length ? lowStockChartData : []).map((item) => {
+                          const heightPercent = Math.max(8, Math.round((item.value / lowStockChartMaxValue) * 100));
+
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onMouseEnter={() => setSelectedLowStockProductId(item.id)}
+                              onFocus={() => setSelectedLowStockProductId(item.id)}
+                              onClick={() => setSelectedLowStockProductId(item.id)}
+                              className="flex flex-1 flex-col items-center justify-end gap-2"
+                              title={`${item.name}: ${salesChartMetric === 'quantity' ? `${item.quantity} und` : formatCurrency(item.price)}`}
+                            >
+                              <div
+                                className={[
+                                  'w-full rounded-t-md transition-all duration-500',
+                                  selectedLowStockProduct?.id === item.id
+                                    ? 'bg-gradient-to-t from-fuchsia-500 to-cyan-400'
+                                    : 'bg-gradient-to-t from-indigo-600 to-blue-500'
+                                ].join(' ')}
+                                style={{ height: `${heightPercent}%` }}
+                              />
+                              <span className={['w-full truncate text-center text-[10px]', isDarkTheme ? 'text-slate-300' : 'text-slate-500'].join(' ')}>
+                                {item.name}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </div>
