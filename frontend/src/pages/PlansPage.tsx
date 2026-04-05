@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
+import { apiFetch as fetch } from '../lib/api';
 import { getAccessToken, getCompanyId, getRole, redirectByRole } from '../lib/session';
 
 const plans = [

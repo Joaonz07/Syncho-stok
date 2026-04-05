@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
+import { getAllowedOrigins } from '../config/runtime';
 import { supabaseAdmin } from '../supabaseClient';
 import { ensureUserHasCompany, normalizeUserRole } from '../services/saasService';
 
@@ -182,8 +183,11 @@ const asConnectedUser = async (token: string): Promise<ConnectedUser | null> => 
 };
 
 export const initSocketGateway = (httpServer: HttpServer) => {
+  const allowedOrigins = getAllowedOrigins();
   const io = new SocketServer(httpServer, {
-    cors: { origin: '*' }
+    cors: {
+      origin: allowedOrigins.length > 0 ? allowedOrigins : true
+    }
   });
 
   io.use(async (socket, next) => {

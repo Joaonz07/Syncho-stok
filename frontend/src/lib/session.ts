@@ -32,7 +32,7 @@ export const getRole = () => (localStorage.getItem(KEYS.role) || '').toUpperCase
 export const getCompanyId = () => localStorage.getItem(KEYS.companyId) || '';
 
 export const getBackendOrigin = () =>
-  (import.meta.env.VITE_BACKEND_ORIGIN as string | undefined)?.trim() || 'http://localhost:5000';
+  (import.meta.env.VITE_API_URL as string | undefined)?.trim() || window.location.origin;
 
 export const redirectByRole = (role: string) => {
   void role;

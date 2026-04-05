@@ -1,41 +1,42 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://tdjldzfrhwaxnbmpcaup.supabase.co'
+const supabaseUrl = String(process.env.SUPABASE_URL || '').trim();
+const supabaseKey =
+  String(
+    process.env.SUPABASE_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_PUBLIC_KEY ||
+      ''
+  ).trim();
 const supabaseServiceKey =
-	process.env.SUPABASE_SERVICE_KEY ||
-	process.env.SUPABASE_SERVICE_ROLE_KEY ||
-	''
-const supabaseAnonKey =
-	process.env.SUPABASE_ANON_KEY ||
-	process.env.SUPABASE_KEY ||
-	process.env.SUPABASE_PUBLIC_KEY ||
-	supabaseServiceKey ||
-	''
+  String(
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_SERVICE_KEY ||
+      process.env.SUPABASE_KEY ||
+      ''
+  ).trim();
 
-if (!supabaseUrl || !supabaseAnonKey) {
-	const missing: string[] = []
-	if (!supabaseUrl) missing.push('SUPABASE_URL')
-	if (!supabaseAnonKey) missing.push('SUPABASE_ANON_KEY (ou SUPABASE_KEY/SUPABASE_PUBLIC_KEY/SUPABASE_SERVICE_ROLE_KEY)')
+if (!supabaseUrl || !supabaseKey) {
+  const missing: string[] = [];
 
-	throw new Error(`Missing Supabase environment variables: ${missing.join(', ')}`)
+  if (!supabaseUrl) missing.push('SUPABASE_URL');
+  if (!supabaseKey) missing.push('SUPABASE_KEY');
+
+  throw new Error(`Missing Supabase environment variables: ${missing.join(', ')}`);
 }
 
-export const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
-	auth: {
-		autoRefreshToken: false,
-		persistSession: false
-	}
-})
+export const supabaseAuth = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
 
-export const supabaseAdmin = createClient(
-	supabaseUrl,
-	supabaseServiceKey || supabaseAnonKey,
-	{
-		auth: {
-			autoRefreshToken: false,
-			persistSession: false
-		}
-	}
-)
+export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
 
-export const supabase = supabaseAdmin
+export const supabase = supabaseAdmin;

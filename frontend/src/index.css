@@ -11,14 +11,14 @@
 
   html {
     height: 100%;
-    background: #020617;
+    background: #030712;
     overscroll-behavior-y: none;
   }
 
   body {
     margin: 0;
     min-height: 100dvh;
-    background: #020617;
+    background: #030712;
     color: #f8fafc;
     font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
     overscroll-behavior-y: none;
@@ -26,10 +26,54 @@
 
   #root {
     min-height: 100dvh;
-    background: #020617;
+    background: #030712;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 99px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.45);
   }
 }
 
+/* ── Recharts customization ── */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
+.recharts-default-tooltip {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 12px !important;
+  backdrop-filter: blur(12px) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+  color: #e2e8f0 !important;
+  font-size: 13px !important;
+}
+
+.recharts-default-tooltip .recharts-tooltip-label {
+  color: #94a3b8 !important;
+  font-size: 11px !important;
+  margin-bottom: 4px !important;
+}
+
+/* ── Keyframes ── */
 @keyframes lineDraw {
   to {
     stroke-dashoffset: 0;
@@ -59,3 +103,94 @@
     transform: translateY(0);
   }
 }
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+  }
+
+  50% {
+    box-shadow: 0 0 18px 4px rgba(34, 211, 238, 0.25);
+  }
+}
+
+/* ── Sidebar active indicator ── */
+.sidebar-active-item {
+  position: relative;
+}
+
+.sidebar-active-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  background: linear-gradient(180deg, #22d3ee, #3b82f6);
+  border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+}
+
+/* ── KPI card number counter animation ── */
+@keyframes countUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Glassmorphism card base ── */
+.glass-card {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+}
+
+.glass-card-hover {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card-hover:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+/* ── Neon glow variants ── */
+.neon-cyan {
+  box-shadow: 0 0 24px rgba(34, 211, 238, 0.2);
+}
+
+.neon-cyan:hover {
+  box-shadow: 0 0 36px rgba(34, 211, 238, 0.35);
+}
+
+.neon-blue {
+  box-shadow: 0 0 24px rgba(59, 130, 246, 0.2);
+}
+
+/* ── Page transition container ── */
+.page-content {
+  animation: fadeSlideUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+

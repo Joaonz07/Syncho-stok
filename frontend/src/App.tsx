@@ -1,8 +1,20 @@
+import { Suspense, lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import LoginPage from './pages/LoginPage';
-import Dashboard from './pages/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import { useAuth } from './context/AuthContext';
+
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage'));
+const PlansPage = lazy(() => import('./pages/PlansPage'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+
+const RouteLoader = () => (
+  <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 grid place-items-center p-6 text-slate-100">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-5 py-4 text-sm text-slate-300">
+      Carregando pagina...
+    </div>
+  </main>
+);
 
 function RootRedirect() {
   const { loading, isAuthenticated } = useAuth();
@@ -22,19 +34,23 @@ function RootRedirect() {
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<RootRedirect />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="*" element={<RootRedirect />} />
-    </Routes>
+    <Suspense fallback={<RouteLoader />}>
+      <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/plans" element={<PlansPage />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<RootRedirect />} />
+      </Routes>
+    </Suspense>
   );
 }
 

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { apiFetch as fetch } from '../lib/api';
 import { clearSession, getAccessToken, getCompanyId, getRole, saveSession } from '../lib/session';
 
 type LoginResult = {

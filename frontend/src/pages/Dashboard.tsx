@@ -3,7 +3,29 @@ import type { DragEvent } from 'react';
 import { Navigate } from 'react-router-dom';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
+import { apiFetch as fetch, getApiBaseUrl } from '../lib/api';
 import { getAccessToken } from '../lib/session';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  TrendingUp,
+  Package,
+  Users,
+  GitBranch,
+  Settings,
+  LogOut,
+  ChevronRight,
+  Building2,
+  BarChart3
+} from 'lucide-react';
+import {
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Area,
+  AreaChart
+} from 'recharts';
 
 type LeadStatus =
   | 'NOVO_CONTATO'
@@ -154,35 +176,6 @@ const formatDateTime = (value: string) => {
     dateStyle: 'short',
     timeStyle: 'short'
   }).format(date);
-};
-
-const buildSvgPoints = (values: number[], width: number, height: number, padding = 20) => {
-  if (!values.length) {
-    return {
-      polyline: '',
-      areaPath: ''
-    };
-  }
-
-  const max = Math.max(1, ...values);
-  const stepX = values.length > 1 ? (width - padding * 2) / (values.length - 1) : 0;
-
-  const coordinates = values.map((value, index) => {
-    const x = padding + stepX * index;
-    const y = height - padding - (value / max) * (height - padding * 2);
-    return { x, y };
-  });
-
-  const polyline = coordinates.map((point) => `${point.x},${point.y}`).join(' ');
-
-  const first = coordinates[0];
-  const last = coordinates[coordinates.length - 1];
-  const areaPath = `M ${first.x} ${height - padding} L ${polyline.replace(/,/g, ' ')} L ${last.x} ${height - padding} Z`;
-
-  return {
-    polyline,
-    areaPath
-  };
 };
 
 const sortByPosition = (items: Lead[]) =>
@@ -385,7 +378,7 @@ const Dashboard = () => {
 
   const isDarkTheme = uiTheme === 'dark';
   const themedPanelClass = isDarkTheme
-    ? 'rounded-2xl border border-white/10 bg-white/5 p-5 shadow-sm backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg'
+    ? 'glass-card glass-card-hover rounded-2xl p-5 shadow-sm'
     : 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg';
   const themedInputClass = isDarkTheme
     ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none transition-all focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/30'
@@ -749,11 +742,6 @@ const Dashboard = () => {
       };
     });
   }, [salesAnalysis, salesTrendPeriod]);
-
-  const salesTrendChart = useMemo(() => {
-    const values = salesTrendSeries.map((item) => Number(item.value || 0));
-    return buildSvgPoints(values, 520, 210, 24);
-  }, [salesTrendSeries]);
 
   const salesTrendPoints = useMemo(() => {
     const values = salesTrendSeries.map((item) => Number(item.value || 0));
@@ -1276,7 +1264,7 @@ const Dashboard = () => {
       return;
     }
 
-    const socket = io('/', {
+    const socket = io(getApiBaseUrl(), {
       path: '/socket.io',
       transports: ['websocket'],
       auth: { token }
@@ -2349,11 +2337,11 @@ const Dashboard = () => {
 
   if (authLoading) {
     return (
-      <main className={[
-        'min-h-screen grid place-items-center p-6',
-        isDarkTheme ? 'bg-slate-950 text-slate-300' : 'bg-slate-100 text-slate-700'
-      ].join(' ')}>
-        Validando sessao...
+      <main className="min-h-screen grid place-items-center bg-gray-950">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-cyan-500/30 border-t-cyan-400" />
+          <p className="text-sm text-slate-400">Validando sessão...</p>
+        </div>
       </main>
     );
   }
@@ -2365,8 +2353,9 @@ const Dashboard = () => {
   return (
     <main className={[
       'min-h-screen transition-all duration-500',
-      isDarkTheme ? 'bg-gradient-to-b from-slate-950 to-slate-900 text-slate-100' : 'bg-slate-100 text-slate-900'
+      isDarkTheme ? 'bg-gray-950 text-slate-100' : 'bg-slate-100 text-slate-900'
     ].join(' ')}>
+      {/* Theme toggle + Toasts */}
       <div className="fixed right-4 top-4 z-[60] grid gap-2">
         <div className={[
           'flex items-center gap-1 rounded-xl border px-1 py-1 text-xs shadow-lg backdrop-blur-md',
@@ -2397,56 +2386,223 @@ const Dashboard = () => {
             Escuro
           </button>
         </div>
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-lg shadow-slate-300/40"
-          >
-            {toast.message}
-          </div>
-        ))}
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, x: 60, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 60, scale: 0.9 }}
+              transition={{ duration: 0.28, ease: 'easeOut' }}
+              className="rounded-xl border border-emerald-400/30 bg-gray-950/95 px-4 py-3 text-sm font-semibold text-emerald-300 shadow-lg shadow-emerald-900/30 backdrop-blur-md"
+            >
+              {toast.message}
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
-      <div className="grid min-h-screen lg:grid-cols-[250px_1fr]">
+      <div className="flex min-h-screen">
+        {/* ─── SIDEBAR ─── */}
         <aside className={[
-          'p-6 transition-all duration-500',
-          isDarkTheme ? 'bg-[#060b1f] text-slate-100 border-r border-white/10' : 'bg-slate-900 text-slate-100'
-        ].join(' ')}>
-          <h2 className="text-2xl font-black">Syncho CRM</h2>
-          <nav className="mt-8 grid gap-2 text-sm">
-            <button type="button" onClick={() => setActiveView('pipeline')} className={["rounded-xl px-3 py-2 text-left", activeView === 'pipeline' ? 'bg-blue-600 font-semibold text-white' : 'bg-slate-800'].join(' ')}>Funil de vendas</button>
+          'hidden w-[240px] flex-shrink-0 flex-col lg:flex',
+          isDarkTheme
+            ? 'border-r border-white/8 bg-gray-950/95 backdrop-blur-xl'
+            : 'border-r border-slate-200 bg-white'
+        ].join(' ')} style={{ position: 'fixed', top: 0, left: 0, height: '100vh', overflowY: 'auto', zIndex: 40 }}>
+          {/* Logo */}
+          <div className="flex items-center gap-3 px-5 py-6">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-900/40">
+              <BarChart3 className="h-4 w-4 text-white" />
+            </div>
+            <span className={['text-lg font-black tracking-tight', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>
+              Syncho CRM
+            </span>
+          </div>
+
+          {/* Nav */}
+          <nav className="flex-1 px-3 pb-4">
+            {/* Seção principal */}
+            <p className={['mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
+              Principal
+            </p>
+
+            {[
+              { key: 'pipeline' as const, label: 'Funil de vendas', icon: GitBranch },
+              { key: 'sales' as const, label: 'Vendas', icon: TrendingUp },
+              { key: 'products' as const, label: 'Produtos', icon: Package },
+            ].map(({ key, label, icon: Icon }) => {
+              const isActive = activeView === key;
+              return (
+                <motion.button
+                  key={key}
+                  type="button"
+                  whileHover={{ x: 3 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => setActiveView(key)}
+                  className={[
+                    'sidebar-active-item mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                    isActive
+                      ? isDarkTheme
+                        ? 'bg-gradient-to-r from-cyan-500/15 to-blue-500/10 text-cyan-300'
+                        : 'bg-blue-50 text-blue-700'
+                      : isDarkTheme
+                        ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  ].join(' ')}
+                >
+                  <Icon className={['h-4 w-4 flex-shrink-0', isActive ? (isDarkTheme ? 'text-cyan-400' : 'text-blue-600') : ''].join(' ')} />
+                  <span className="flex-1 text-left">{label}</span>
+                  {isActive && <ChevronRight className="h-3 w-3 opacity-60" />}
+                </motion.button>
+              );
+            })}
+
+            {/* Seção admin */}
             {role === 'ADMIN' ? (
               <>
-                <button type="button" onClick={() => setActiveView('companies')} className={["rounded-xl px-3 py-2 text-left", activeView === 'companies' ? 'bg-blue-600 font-semibold text-white' : 'text-slate-300 hover:bg-slate-800'].join(' ')}>
-                  Empresas
-                </button>
-                <button type="button" onClick={() => setActiveView('clients')} className={["rounded-xl px-3 py-2 text-left", activeView === 'clients' ? 'bg-blue-600 font-semibold text-white' : 'text-slate-300 hover:bg-slate-800'].join(' ')}>
-                  Clientes
-                </button>
+                <p className={['mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-widest', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
+                  Administração
+                </p>
+                {[
+                  { key: 'companies' as const, label: 'Empresas', icon: Building2 },
+                  { key: 'clients' as const, label: 'Clientes', icon: Users },
+                ].map(({ key, label, icon: Icon }) => {
+                  const isActive = activeView === key;
+                  return (
+                    <motion.button
+                      key={key}
+                      type="button"
+                      whileHover={{ x: 3 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setActiveView(key)}
+                      className={[
+                        'sidebar-active-item mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                        isActive
+                          ? isDarkTheme
+                            ? 'bg-gradient-to-r from-cyan-500/15 to-blue-500/10 text-cyan-300'
+                            : 'bg-blue-50 text-blue-700'
+                          : isDarkTheme
+                            ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      ].join(' ')}
+                    >
+                      <Icon className={['h-4 w-4 flex-shrink-0', isActive ? (isDarkTheme ? 'text-cyan-400' : 'text-blue-600') : ''].join(' ')} />
+                      <span className="flex-1 text-left">{label}</span>
+                      {isActive && <ChevronRight className="h-3 w-3 opacity-60" />}
+                    </motion.button>
+                  );
+                })}
               </>
             ) : null}
-            <button type="button" onClick={() => setActiveView('sales')} className={["rounded-xl px-3 py-2 text-left", activeView === 'sales' ? 'bg-blue-600 font-semibold text-white' : 'text-slate-300 hover:bg-slate-800'].join(' ')}>Vendas</button>
-            <button type="button" onClick={() => setActiveView('products')} className={["rounded-xl px-3 py-2 text-left", activeView === 'products' ? 'bg-blue-600 font-semibold text-white' : 'text-slate-300 hover:bg-slate-800'].join(' ')}>Produtos</button>
-            <button type="button" onClick={() => setActiveView('settings')} className={["rounded-xl px-3 py-2 text-left", activeView === 'settings' ? 'bg-blue-600 font-semibold text-white' : 'text-slate-300 hover:bg-slate-800'].join(' ')}>
-              <span className="inline-flex items-center gap-2">
-                Configuracoes
-                {supportUnreadCount > 0 ? (
-                  <span className="rounded-full bg-rose-500 px-2 py-0.5 text-xs font-bold text-white">
-                    {supportUnreadCount > 99 ? '99+' : supportUnreadCount}
-                  </span>
-                ) : null}
-              </span>
-            </button>
+
+            {/* Seção sistema */}
+            <p className={['mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-widest', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
+              Sistema
+            </p>
+            <motion.button
+              type="button"
+              whileHover={{ x: 3 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setActiveView('settings')}
+              className={[
+                'sidebar-active-item mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                activeView === 'settings'
+                  ? isDarkTheme
+                    ? 'bg-gradient-to-r from-cyan-500/15 to-blue-500/10 text-cyan-300'
+                    : 'bg-blue-50 text-blue-700'
+                  : isDarkTheme
+                    ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              ].join(' ')}
+            >
+              <Settings className={['h-4 w-4 flex-shrink-0', activeView === 'settings' ? (isDarkTheme ? 'text-cyan-400' : 'text-blue-600') : ''].join(' ')} />
+              <span className="flex-1 text-left">Configurações</span>
+              {supportUnreadCount > 0 ? (
+                <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {supportUnreadCount > 99 ? '99+' : supportUnreadCount}
+                </span>
+              ) : activeView === 'settings' ? <ChevronRight className="h-3 w-3 opacity-60" /> : null}
+            </motion.button>
           </nav>
-          <button type="button" onClick={handleLogout} className="mt-10 w-full rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800">
-            Sair
-          </button>
+
+          {/* Logout */}
+          <div className="px-3 pb-5">
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={handleLogout}
+              className={[
+                'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
+                isDarkTheme
+                  ? 'text-slate-400 hover:bg-rose-500/10 hover:text-rose-300'
+                  : 'text-slate-600 hover:bg-rose-50 hover:text-rose-700'
+              ].join(' ')}
+            >
+              <LogOut className="h-4 w-4" />
+              Sair
+            </motion.button>
+          </div>
         </aside>
 
-        <section className={[
-          'p-4 transition-all duration-500 md:p-6',
-          isDarkTheme ? 'bg-transparent' : ''
+        {/* Mobile nav bar */}
+        <div className={[
+          'fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t px-2 py-2 lg:hidden',
+          isDarkTheme ? 'border-white/10 bg-gray-950/97 backdrop-blur-xl' : 'border-slate-200 bg-white shadow-lg'
         ].join(' ')}>
+          {[
+            { key: 'pipeline' as const, icon: GitBranch, label: 'Funil' },
+            { key: 'sales' as const, icon: TrendingUp, label: 'Vendas' },
+            { key: 'products' as const, icon: Package, label: 'Produtos' },
+            ...(role === 'ADMIN' ? [
+              { key: 'companies' as const, icon: Building2, label: 'Empresas' },
+              { key: 'clients' as const, icon: Users, label: 'Clientes' },
+            ] : []),
+            { key: 'settings' as const, icon: Settings, label: 'Config' },
+          ].map(({ key, icon: Icon, label }) => {
+            const isActive = activeView === key;
+            return (
+              <motion.button
+                key={key}
+                type="button"
+                whileTap={{ scale: 0.88 }}
+                onClick={() => setActiveView(key)}
+                className={[
+                  'flex flex-col items-center gap-0.5 rounded-xl px-3 py-1.5 text-[10px] font-semibold transition-all',
+                  isActive
+                    ? isDarkTheme ? 'text-cyan-400' : 'text-blue-600'
+                    : isDarkTheme ? 'text-slate-500' : 'text-slate-400'
+                ].join(' ')}
+              >
+                <Icon className="h-5 w-5" />
+                {label}
+                {key === 'settings' && supportUnreadCount > 0 ? (
+                  <span className="absolute -mt-3 ml-4 h-2 w-2 rounded-full bg-rose-500" />
+                ) : null}
+              </motion.button>
+            );
+          })}
+        </div>
+
+        {/* ─── MAIN CONTENT ─── */}
+        <section className={[
+          'flex-1 min-h-screen transition-all duration-500',
+          'lg:pl-[240px]'
+        ].join(' ')}>
+          <div className="p-4 pb-24 md:p-6 lg:pb-6">
+            {/* ── Bem-vindo header ── */}
+            <motion.div
+              key={activeView}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="page-content"
+            >
+
+          {/* ── VIEW: PIPELINE ── */}
+
+          {/* ── VIEW: PIPELINE ── */}
           {activeView === 'pipeline' ? (
             <>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -2454,20 +2610,37 @@ const Dashboard = () => {
               <h1 className={themedTitleClass}>Funil de vendas</h1>
               <p className={themedSubtextClass}>Arraste os cards entre as etapas para atualizar o status.</p>
             </div>
-            <button type="button" onClick={fetchLeads} disabled={loading} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-70">
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={fetchLeads}
+              disabled={loading}
+              className={[
+                'rounded-xl px-4 py-2 text-sm font-semibold transition-all',
+                isDarkTheme
+                  ? 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10'
+                  : 'bg-slate-900 text-white hover:bg-slate-800'
+              ].join(' ')}
+            >
               {loading ? 'Atualizando...' : 'Atualizar'}
-            </button>
+            </motion.button>
           </div>
 
           <div className={[themedPanelClass, 'mb-5 p-4'].join(' ')}>
             <div className="grid gap-4 xl:grid-cols-[2fr_1.1fr]">
               <div className="grid gap-4 lg:grid-cols-2">
-                <article className={[
-                  'rounded-xl p-4',
-                  isDarkTheme
-                    ? 'border border-cyan-300/30 bg-gradient-to-br from-slate-900 to-[#0a2532] shadow-[0_0_28px_rgba(34,211,238,0.18)]'
-                    : 'border border-slate-200 bg-slate-50'
-                ].join(' ')}>
+                <motion.article
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.05 }}
+                  className={[
+                    'rounded-xl p-4',
+                    isDarkTheme
+                      ? 'border border-cyan-300/30 bg-gradient-to-br from-slate-900 to-[#0a2532] shadow-[0_0_28px_rgba(34,211,238,0.18)] neon-cyan'
+                      : 'border border-slate-200 bg-slate-50'
+                  ].join(' ')}
+                >
                   <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Total Vendas</h3>
                   <p className={['mt-2 text-3xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{formatCurrency(enabledTotals.totalSales)}</p>
                   <p className={['mt-3 text-xs', salesDropPercent > 0 ? 'text-rose-400' : isDarkTheme ? 'text-emerald-300' : 'text-emerald-600'].join(' ')}>
@@ -2476,13 +2649,17 @@ const Dashboard = () => {
                       : 'Sem queda percentual no momento'}
                   </p>
                   <p className={['mt-2 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                    Leads totais ativos: <strong>{enabledTotals.totalLeads}</strong> (variacao {leadsDropPercent.toFixed(1)}%)
+                    Leads totais ativos: <strong>{enabledTotals.totalLeads}</strong> (variação {leadsDropPercent.toFixed(1)}%)
                   </p>
-                </article>
+                </motion.article>
 
-                <article className={[
-                  'rounded-xl p-4',
-                  isDarkTheme
+                <motion.article
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.1 }}
+                  className={[
+                    'rounded-xl p-4',
+                    isDarkTheme
                     ? 'border border-indigo-300/25 bg-gradient-to-br from-slate-900 to-[#111c3a] shadow-[0_0_24px_rgba(129,140,248,0.16)]'
                     : 'border border-slate-200 bg-white'
                 ].join(' ')}>
@@ -2505,14 +2682,19 @@ const Dashboard = () => {
                       ))}
                     </div>
                   </div>
-                </article>
+                </motion.article>
 
-                <article className={[
-                  'rounded-xl p-4',
-                  isDarkTheme
-                    ? 'border border-fuchsia-300/20 bg-gradient-to-br from-slate-900 to-[#2a1338] shadow-[0_0_24px_rgba(217,70,239,0.12)]'
-                    : 'border border-slate-200 bg-slate-50'
-                ].join(' ')}>
+                <motion.article
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.15 }}
+                  className={[
+                    'rounded-xl p-4',
+                    isDarkTheme
+                      ? 'border border-fuchsia-300/20 bg-gradient-to-br from-slate-900 to-[#2a1338] shadow-[0_0_24px_rgba(217,70,239,0.12)]'
+                      : 'border border-slate-200 bg-slate-50'
+                  ].join(' ')}
+                >
                   <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Dias entre etapas do funil</h3>
                   <div className="mt-3 grid gap-2">
                     {stageAverageDays.map((stage) => (
@@ -2530,14 +2712,19 @@ const Dashboard = () => {
                       </div>
                     ))}
                   </div>
-                </article>
+                </motion.article>
 
-                <article className={[
-                  'rounded-xl p-4',
-                  isDarkTheme
-                    ? 'border border-cyan-300/20 bg-gradient-to-br from-slate-900 to-[#08243a] shadow-[0_0_24px_rgba(34,211,238,0.11)]'
-                    : 'border border-slate-200 bg-white'
-                ].join(' ')}>
+                <motion.article
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.2 }}
+                  className={[
+                    'rounded-xl p-4',
+                    isDarkTheme
+                      ? 'border border-cyan-300/20 bg-gradient-to-br from-slate-900 to-[#08243a] shadow-[0_0_24px_rgba(34,211,238,0.11)]'
+                      : 'border border-slate-200 bg-white'
+                  ].join(' ')}
+                >
                   <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Vendas & Leads por origem</h3>
                   <div className="mt-3 grid gap-2">
                     {funnelBySource.map((source) => {
@@ -2565,14 +2752,19 @@ const Dashboard = () => {
                       );
                     })}
                   </div>
-                </article>
+                </motion.article>
 
-                <article className={[
-                  'rounded-xl p-4 lg:col-span-2',
-                  isDarkTheme
-                    ? 'border border-cyan-300/20 bg-gradient-to-br from-slate-900 to-[#0d1f35] shadow-[0_0_24px_rgba(34,211,238,0.1)]'
-                    : 'border border-slate-200 bg-slate-50'
-                ].join(' ')}>
+                <motion.article
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.25 }}
+                  className={[
+                    'rounded-xl p-4 lg:col-span-2',
+                    isDarkTheme
+                      ? 'border border-cyan-300/20 bg-gradient-to-br from-slate-900 to-[#0d1f35] shadow-[0_0_24px_rgba(34,211,238,0.1)]'
+                      : 'border border-slate-200 bg-slate-50'
+                  ].join(' ')}
+                >
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Taxa de rejeicao</h3>
                     <div className="inline-flex rounded-lg border border-white/15 p-1">
@@ -2650,18 +2842,23 @@ const Dashboard = () => {
                       ))}
                     </div>
                   )}
-                </article>
+                </motion.article>
               </div>
 
-              <aside className={[
-                'rounded-xl p-4',
-                isDarkTheme
-                  ? 'border border-amber-300/20 bg-gradient-to-b from-slate-900 to-[#2f1b0a] shadow-[0_0_28px_rgba(251,191,36,0.12)]'
-                  : 'border border-slate-200 bg-white'
-              ].join(' ')}>
-                <h3 className={['text-sm font-bold', isDarkTheme ? 'text-amber-200' : 'text-slate-700'].join(' ')}>Integracao de vendas</h3>
+              <motion.aside
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.45, delay: 0.15 }}
+                className={[
+                  'rounded-xl p-4',
+                  isDarkTheme
+                    ? 'border border-amber-300/20 bg-gradient-to-b from-slate-900 to-[#2f1b0a] shadow-[0_0_28px_rgba(251,191,36,0.12)]'
+                    : 'border border-slate-200 bg-white'
+                ].join(' ')}
+              >
+                <h3 className={['text-sm font-bold', isDarkTheme ? 'text-amber-200' : 'text-slate-700'].join(' ')}>Integração de vendas</h3>
                 <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                  Controle os vendedores ativos e acompanhe cada venda com data e horario automaticos.
+                  Controle os vendedores ativos e acompanhe cada venda com data e horário automáticos.
                 </p>
 
                 <div className="mt-3 grid gap-2">
@@ -2724,7 +2921,7 @@ const Dashboard = () => {
                     )}
                   </div>
                 </div>
-              </aside>
+              </motion.aside>
             </div>
           </div>
 
@@ -2744,9 +2941,15 @@ const Dashboard = () => {
               <input className={themedInputClass} placeholder="Valor (R$)" type="number" step="0.01" value={value} onChange={(event) => setValue(event.target.value)} />
               <input className={[themedInputClass, 'lg:col-span-2'].join(' ')} placeholder="Observacao" value={notes} onChange={(event) => setNotes(event.target.value)} />
             </div>
-            <button type="button" onClick={handleCreateLead} className="mt-3 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500">
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={handleCreateLead}
+              className="mt-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-900/30 hover:from-blue-500 hover:to-cyan-400"
+            >
               Criar novo card
-            </button>
+            </motion.button>
           </div>
 
           <div className={[themedPanelClass, 'mb-5 p-4'].join(' ')}>
@@ -2809,27 +3012,38 @@ const Dashboard = () => {
 
                   <div className="grid gap-3">
                     {columnLeads.map((lead) => (
-                      <article
+                      <motion.article
                         key={lead.id}
                         draggable
-                        onDragStart={(event) => onDragStart(event, lead.id)}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        whileHover={{ y: -2, boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}
+                        whileTap={{ scale: 0.98 }}
+                        transition={{ duration: 0.22, ease: 'easeOut' }}
+                        onDragStart={(event) => onDragStart(event as unknown as DragEvent<HTMLElement>, lead.id)}
                         onDragEnd={onDragEnd}
                         onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => onDropOnCard(event, column.key, lead.id)}
+                        onDrop={(event) => onDropOnCard(event as unknown as DragEvent<HTMLElement>, column.key, lead.id)}
                         onClick={() => openEditModal(lead)}
                         className={[
-                          'rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-all duration-200',
+                          'rounded-xl border p-3 shadow-sm transition-all duration-200',
+                          isDarkTheme
+                            ? 'border-white/10 bg-white/5 text-slate-100 backdrop-blur-sm cursor-pointer'
+                            : 'border-slate-200 bg-white cursor-pointer',
                           draggedLeadId === lead.id
                             ? 'cursor-grabbing scale-[0.98] rotate-1 opacity-60 shadow-lg'
-                            : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md',
-                          recentlyMovedLeadId === lead.id ? 'ring-2 ring-emerald-200 shadow-md' : ''
+                            : '',
+                          recentlyMovedLeadId === lead.id
+                            ? isDarkTheme ? 'ring-2 ring-cyan-400/50 shadow-md' : 'ring-2 ring-emerald-200 shadow-md'
+                            : ''
                         ].join(' ')}
                       >
-                        <p className="text-sm font-semibold text-slate-800">{lead.name}</p>
-                        <p className="mt-1 text-xs text-slate-500">Prioridade: {lead.priority}</p>
-                        <p className="mt-2 text-xs text-slate-600">{lead.notes || 'Sem observacao.'}</p>
-                        <p className="mt-3 text-sm font-bold text-emerald-600">{formatCurrency(Number(lead.value || 0))}</p>
-                      </article>
+                        <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{lead.name}</p>
+                        <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Prioridade: {lead.priority}</p>
+                        <p className={['mt-2 text-xs', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{lead.notes || 'Sem observação.'}</p>
+                        <p className={['mt-3 text-sm font-bold', isDarkTheme ? 'text-emerald-400' : 'text-emerald-600'].join(' ')}>{formatCurrency(Number(lead.value || 0))}</p>
+                      </motion.article>
                     ))}
 
                     {!columnLeads.length ? (
@@ -3651,15 +3865,22 @@ const Dashboard = () => {
                 </div>
 
                 <div className="mt-4 grid gap-4 xl:grid-cols-[1.35fr_1fr]">
-                  <div className={['rounded-xl p-4 transition-all', isDarkTheme ? 'border border-cyan-300/30 bg-gradient-to-b from-slate-900/85 to-slate-950/85 shadow-[0_0_35px_rgba(34,211,238,0.18),inset_0_0_22px_rgba(56,189,248,0.08)]' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                  {/* ── Recharts AreaChart (substitui SVG) ── */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.45, delay: 0.1 }}
+                    className={['rounded-xl p-4', isDarkTheme ? 'border border-cyan-300/30 bg-gradient-to-b from-slate-900/85 to-slate-950/85 shadow-[0_0_35px_rgba(34,211,238,0.18)] neon-cyan' : 'border border-slate-200 bg-slate-50'].join(' ')}
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Tendencia dos indicadores</h3>
+                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Tendência dos indicadores</h3>
                       <div className="inline-flex rounded-lg border border-white/15 p-1">
                         {(['7d', '30d', '90d'] as const).map((period) => (
-                          <button
+                          <motion.button
                             key={period}
                             type="button"
-                            onClick={() => setSalesTrendPeriod(period)}
+                            whileTap={{ scale: 0.93 }}
+                            onClick={() => { setSalesTrendPeriod(period); setSelectedTrendPointIndex(null); }}
                             className={[
                               'rounded-md px-2 py-1 text-xs font-semibold uppercase transition-all',
                               salesTrendPeriod === period
@@ -3670,105 +3891,94 @@ const Dashboard = () => {
                             ].join(' ')}
                           >
                             {period}
-                          </button>
+                          </motion.button>
                         ))}
                       </div>
                     </div>
                     <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                      Curva comparativa entre os principais sinais do negocio.
+                      Curva comparativa entre os principais sinais do negócio.
                     </p>
 
-                    <div className="mt-3 overflow-hidden rounded-lg border border-white/10 bg-black/10 p-2">
-                      <svg viewBox="0 0 520 210" className="h-56 w-full" role="img" aria-label="Grafico de tendencia dos indicadores">
-                        <line x1="24" y1="24" x2="24" y2="186" stroke={isDarkTheme ? '#334155' : '#cbd5e1'} strokeWidth="1" />
-                        <line x1="24" y1="186" x2="496" y2="186" stroke={isDarkTheme ? '#334155' : '#cbd5e1'} strokeWidth="1" />
-                        <line x1="24" y1="146" x2="496" y2="146" stroke={isDarkTheme ? '#1e293b' : '#e2e8f0'} strokeWidth="1" strokeDasharray="4 4" />
-                        <line x1="24" y1="106" x2="496" y2="106" stroke={isDarkTheme ? '#1e293b' : '#e2e8f0'} strokeWidth="1" strokeDasharray="4 4" />
-                        <line x1="24" y1="66" x2="496" y2="66" stroke={isDarkTheme ? '#1e293b' : '#e2e8f0'} strokeWidth="1" strokeDasharray="4 4" />
-
-                        {salesTrendChart.areaPath ? (
-                          <path d={salesTrendChart.areaPath} fill={isDarkTheme ? 'rgba(34,211,238,0.16)' : 'rgba(14,165,233,0.14)'} style={{ animation: 'chartFadeIn 700ms ease both' }} />
-                        ) : null}
-
-                        {salesTrendChart.polyline ? (
-                          <polyline
-                            points={salesTrendChart.polyline}
-                            fill="none"
-                            stroke={isDarkTheme ? '#22d3ee' : '#0284c7'}
-                            strokeWidth="3"
-                            strokeLinejoin="round"
-                            strokeLinecap="round"
-                            style={{
-                              filter: isDarkTheme ? 'drop-shadow(0 0 8px rgba(34,211,238,0.65))' : 'none',
-                              strokeDasharray: 900,
-                              strokeDashoffset: 900,
-                              animation: 'lineDraw 1.1s ease forwards'
+                    <div className="mt-3 h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={salesTrendSeries} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                          <defs>
+                            <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={isDarkTheme ? '#22d3ee' : '#0284c7'} stopOpacity={0.35} />
+                              <stop offset="95%" stopColor={isDarkTheme ? '#22d3ee' : '#0284c7'} stopOpacity={0.03} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke={isDarkTheme ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)'}
+                          />
+                          <XAxis
+                            dataKey="label"
+                            tick={{ fontSize: 10, fill: isDarkTheme ? '#94a3b8' : '#64748b' }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis
+                            tick={{ fontSize: 10, fill: isDarkTheme ? '#94a3b8' : '#64748b' }}
+                            axisLine={false}
+                            tickLine={false}
+                            tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)}
+                            width={44}
+                          />
+                          <Tooltip
+                            formatter={(v) => [formatCurrency(Number(v)), 'Valor Estimado']}
+                            labelStyle={{ color: isDarkTheme ? '#94a3b8' : '#64748b', fontSize: 11 }}
+                            contentStyle={{
+                              background: 'rgba(15,23,42,0.92)',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              borderRadius: 12,
+                              backdropFilter: 'blur(12px)',
+                              color: '#e2e8f0',
+                              fontSize: 13,
+                              boxShadow: '0 8px 32px rgba(0,0,0,0.4)'
                             }}
                           />
-                        ) : null}
-
-                        {activeTrendPoint ? (
-                          <line
-                            x1={activeTrendPoint.x}
-                            y1="24"
-                            x2={activeTrendPoint.x}
-                            y2="186"
+                          <Area
+                            type="monotone"
+                            dataKey="value"
                             stroke={isDarkTheme ? '#22d3ee' : '#0284c7'}
-                            strokeWidth="1.5"
-                            strokeDasharray="5 5"
-                            opacity="0.65"
+                            strokeWidth={3}
+                            fill="url(#trendGrad)"
+                            dot={{ r: 4, fill: isDarkTheme ? '#22d3ee' : '#0284c7', strokeWidth: 0 }}
+                            activeDot={{
+                              r: 7,
+                              fill: isDarkTheme ? '#22d3ee' : '#0284c7',
+                              stroke: isDarkTheme ? 'rgba(34,211,238,0.4)' : 'rgba(2,132,199,0.3)',
+                              strokeWidth: 4
+                            }}
+                            animationDuration={900}
+                            animationEasing="ease-out"
                           />
-                        ) : null}
-
-                        {salesTrendPoints.map((point) => {
-                          const isActive = activeTrendPoint?.index === point.index;
-
-                          return (
-                            <g key={`${point.label}-${point.index}`}>
-                              <circle
-                                cx={point.x}
-                                cy={point.y}
-                                r="12"
-                                fill="transparent"
-                                role="button"
-                                tabIndex={0}
-                                aria-label={`Ponto ${point.label} com valor ${formatCurrency(point.value)}`}
-                                style={{ cursor: 'pointer' }}
-                                onMouseEnter={() => setSelectedTrendPointIndex(point.index)}
-                                onClick={() => setSelectedTrendPointIndex(point.index)}
-                                onFocus={() => setSelectedTrendPointIndex(point.index)}
-                              />
-                              <circle
-                                cx={point.x}
-                                cy={point.y}
-                                r={isActive ? 7 : 5}
-                                fill={isDarkTheme ? '#22d3ee' : '#0284c7'}
-                                style={{
-                                  animation: `chartFadeIn 380ms ease ${point.index * 80}ms both`,
-                                  filter: isActive ? 'drop-shadow(0 0 10px rgba(34,211,238,0.9))' : 'none'
-                                }}
-                              />
-                              <text x={point.x} y={202} textAnchor="middle" fontSize="10" fill={isDarkTheme ? '#cbd5e1' : '#475569'}>
-                                {point.label}
-                              </text>
-                            </g>
-                          );
-                        })}
-                      </svg>
+                        </AreaChart>
+                      </ResponsiveContainer>
                     </div>
 
                     {activeTrendPoint ? (
-                      <div className={['mt-3 rounded-lg p-3 text-xs', isDarkTheme ? 'border border-cyan-400/25 bg-slate-950/70 text-cyan-100' : 'border border-slate-200 bg-white text-slate-700'].join(' ')}>
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className={['mt-3 rounded-lg p-3 text-xs', isDarkTheme ? 'border border-cyan-400/25 bg-slate-950/70 text-cyan-100' : 'border border-slate-200 bg-white text-slate-700'].join(' ')}
+                      >
                         <p><strong>Ponto:</strong> {activeTrendPoint.label}</p>
                         <p><strong>Valor estimado:</strong> {formatCurrency(activeTrendPoint.value)}</p>
-                      </div>
+                      </motion.div>
                     ) : null}
-                  </div>
+                  </motion.div>
 
-                  <div className={['rounded-xl p-4 transition-all', isDarkTheme ? 'border border-fuchsia-300/25 bg-gradient-to-b from-slate-900/85 to-slate-950/85 shadow-[0_0_35px_rgba(217,70,239,0.14),inset_0_0_18px_rgba(56,189,248,0.06)]' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.45, delay: 0.18 }}
+                    className={['rounded-xl p-4', isDarkTheme ? 'border border-fuchsia-300/25 bg-gradient-to-b from-slate-900/85 to-slate-950/85 shadow-[0_0_35px_rgba(217,70,239,0.14)]' : 'border border-slate-200 bg-slate-50'].join(' ')}
+                  >
                     <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Colunas por produto</h3>
                     <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                      Visual de colunas para destacar rapidamente os itens mais criticos.
+                      Visual de colunas para destacar rapidamente os itens mais críticos.
                     </p>
 
                     <div className={['mt-3 rounded-lg border p-3', isDarkTheme ? 'border-white/10 bg-black/10' : 'border-slate-200 bg-white'].join(' ')}>
@@ -3777,81 +3987,123 @@ const Dashboard = () => {
                           const heightPercent = Math.max(8, Math.round((item.value / lowStockChartMaxValue) * 100));
 
                           return (
-                            <button
+                            <motion.button
                               key={item.id}
                               type="button"
+                              whileHover={{ scale: 1.04 }}
+                              whileTap={{ scale: 0.96 }}
                               onMouseEnter={() => setSelectedLowStockProductId(item.id)}
                               onFocus={() => setSelectedLowStockProductId(item.id)}
                               onClick={() => setSelectedLowStockProductId(item.id)}
                               className="flex flex-1 flex-col items-center justify-end gap-2"
                               title={`${item.name}: ${salesChartMetric === 'quantity' ? `${item.quantity} und` : formatCurrency(item.price)}`}
                             >
-                              <div
+                              <motion.div
                                 className={[
-                                  'w-full rounded-t-md transition-all duration-500',
+                                  'w-full rounded-t-md',
                                   selectedLowStockProduct?.id === item.id
                                     ? 'bg-gradient-to-t from-fuchsia-500 to-cyan-400'
                                     : 'bg-gradient-to-t from-indigo-600 to-blue-500'
                                 ].join(' ')}
+                                initial={{ scaleY: 0 }}
+                                animate={{ scaleY: 1 }}
+                                transition={{ duration: 0.5, delay: index * 0.08, ease: [0.2, 0.9, 0.2, 1] }}
                                 style={{
                                   height: `${heightPercent}%`,
-                                  transformOrigin: 'bottom',
-                                  animation: `barGrow 480ms cubic-bezier(0.2, 0.9, 0.2, 1) ${index * 90}ms both`
+                                  transformOrigin: 'bottom'
                                 }}
                               />
                               <span className={['w-full truncate text-center text-[10px]', isDarkTheme ? 'text-slate-300' : 'text-slate-500'].join(' ')}>
                                 {item.name}
                               </span>
-                            </button>
+                            </motion.button>
                           );
                         })}
                       </div>
                     </div>
-                  </div>
+                  </motion.div>
                 </div>
               </div>
             </div>
           ) : null}
 
           {role === 'ADMIN' || activeView === 'products' || activeView === 'settings' || activeView === 'sales' ? (
-            <p className="mt-4 text-sm text-slate-500">{adminLoading ? 'Sincronizando area administrativa...' : status}</p>
+            <p className={['mt-4 text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>{adminLoading ? 'Sincronizando área administrativa...' : status}</p>
           ) : null}
+
+            </motion.div>
+          </div>
         </section>
       </div>
 
-      {editingLeadId ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/45 p-4">
-          <div className={['w-full max-w-lg p-5 shadow-xl', themedPanelClass].join(' ')}>
-            <h3 className={isDarkTheme ? 'text-lg font-bold text-white' : 'text-lg font-bold text-slate-900'}>Editar card</h3>
-            <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>Atualize os dados do lead no funil.</p>
+      {/* ── Edit Lead Modal with AnimatePresence ── */}
+      <AnimatePresence>
+        {editingLeadId ? (
+          <motion.div
+            key="edit-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.22 }}
+            className="fixed inset-0 z-50 grid place-items-center bg-slate-900/60 p-4 backdrop-blur-sm"
+          >
+            <motion.div
+              key="edit-modal-content"
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              transition={{ duration: 0.28, ease: 'easeOut' }}
+              className={['w-full max-w-lg p-5 shadow-2xl', themedPanelClass].join(' ')}
+            >
+              <h3 className={isDarkTheme ? 'text-lg font-bold text-white' : 'text-lg font-bold text-slate-900'}>Editar card</h3>
+              <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>Atualize os dados do lead no funil.</p>
 
-            <div className="mt-4 grid gap-3">
-              <input className={themedInputClass} placeholder="Nome" value={editName} onChange={(event) => setEditName(event.target.value)} />
-              <select className={themedSelectClass} value={editPriority} onChange={(event) => setEditPriority(event.target.value as LeadPriority)}>
-                <option className={themedOptionClass} value="BAIXA">Prioridade baixa</option>
-                <option className={themedOptionClass} value="MEDIA">Prioridade media</option>
-                <option className={themedOptionClass} value="ALTA">Prioridade alta</option>
-              </select>
-              <input className={themedInputClass} placeholder="Valor (R$)" type="number" step="0.01" value={editValue} onChange={(event) => setEditValue(event.target.value)} />
-              <textarea className={['min-h-[100px]', themedInputClass].join(' ')} placeholder="Observacao" value={editNotes} onChange={(event) => setEditNotes(event.target.value)} />
-            </div>
-
-            <div className="mt-5 flex flex-wrap justify-between gap-2">
-              <button type="button" onClick={deleteLead} className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500">
-                Excluir
-              </button>
-              <div className="flex gap-2">
-                <button type="button" onClick={closeEditModal} className={isDarkTheme ? 'rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10' : 'rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100'}>
-                  Cancelar
-                </button>
-                <button type="button" onClick={saveLeadChanges} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500">
-                  Salvar
-                </button>
+              <div className="mt-4 grid gap-3">
+                <input className={themedInputClass} placeholder="Nome" value={editName} onChange={(event) => setEditName(event.target.value)} />
+                <select className={themedSelectClass} value={editPriority} onChange={(event) => setEditPriority(event.target.value as LeadPriority)}>
+                  <option className={themedOptionClass} value="BAIXA">Prioridade baixa</option>
+                  <option className={themedOptionClass} value="MEDIA">Prioridade média</option>
+                  <option className={themedOptionClass} value="ALTA">Prioridade alta</option>
+                </select>
+                <input className={themedInputClass} placeholder="Valor (R$)" type="number" step="0.01" value={editValue} onChange={(event) => setEditValue(event.target.value)} />
+                <textarea className={['min-h-[100px]', themedInputClass].join(' ')} placeholder="Observação" value={editNotes} onChange={(event) => setEditNotes(event.target.value)} />
               </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+
+              <div className="mt-5 flex flex-wrap justify-between gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  type="button"
+                  onClick={deleteLead}
+                  className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500"
+                >
+                  Excluir
+                </motion.button>
+                <div className="flex gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    type="button"
+                    onClick={closeEditModal}
+                    className={isDarkTheme ? 'rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10' : 'rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100'}
+                  >
+                    Cancelar
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    type="button"
+                    onClick={saveLeadChanges}
+                    className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-900/30 hover:from-blue-500 hover:to-cyan-400"
+                  >
+                    Salvar
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </main>
   );
 };
