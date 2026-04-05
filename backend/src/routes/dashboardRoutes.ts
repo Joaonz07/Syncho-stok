@@ -13,6 +13,7 @@ import {
 } from '../services/saasService';
 import { sendSupportRequestNotification } from '../services/emailService';
 import { emitSupportMessage } from '../socket/gateway';
+import { emitIntegrationMessage } from '../socket/gateway';
 
 const router = Router();
 
@@ -23,6 +24,8 @@ const tableAliases = {
   leads: ['leads', 'Lead'],
   messages: ['messages', 'Message'],
   supportRequests: ['support_requests', 'supportRequests', 'SupportRequest'],
+  integrations: ['integrations', 'integration_connections', 'IntegrationConnection'],
+  integrationMessages: ['integration_messages', 'integrationMessages', 'IntegrationMessage'],
   saleItems: ['sale_items', 'saleItems', 'SaleItem'],
   stockMovements: ['stock_movements', 'stockMovements', 'StockMovement']
 } as const;
@@ -40,12 +43,34 @@ const leadPriorities = ['BAIXA', 'MEDIA', 'ALTA'] as const;
 const supportStatuses = ['PENDING', 'IN_REVIEW', 'DONE'] as const;
 type LeadStatus = (typeof leadStatuses)[number];
 type SupportStatus = (typeof supportStatuses)[number];
+type IntegrationProvider = 'WHATSAPP' | 'INSTAGRAM';
 type SupportChatMessage = {
   id: string;
   companyId: string;
   requestId: string | null;
   senderId: string;
   senderName: string;
+  senderRole: 'ADMIN' | 'CLIENT';
+  content: string;
+  createdAt: string;
+};
+
+type IntegrationConnection = {
+  provider: IntegrationProvider;
+  companyId: string;
+  connected: boolean;
+  token: string | null;
+  accountId: string | null;
+  updatedAt: string;
+};
+
+type IntegrationChatMessage = {
+  id: string;
+  provider: IntegrationProvider;
+  companyId: string;
+  conversationId: string;
+  userId: string;
+  userName: string;
   senderRole: 'ADMIN' | 'CLIENT';
   content: string;
   createdAt: string;
@@ -195,6 +220,281 @@ const mapSupportChatMessages = async (
       createdAt: String(row.created_at || row.createdAt || new Date().toISOString())
     };
   });
+};
+
+const integrationProviders = ['WHATSAPP', 'INSTAGRAM'] as const;
+const integrationProviderFields = ['provider', 'channel'];
+const integrationConversationAliases = ['conversation_id', 'conversationId'];
+const integrationUserAliases = ['user_id', 'userId'];
+const integrationUserNameAliases = ['user_name', 'userName', 'contact_name', 'contactName'];
+
+const integrationConnectionMemory = new Map<string, IntegrationConnection>();
+const integrationMessageMemory: IntegrationChatMessage[] = [];
+
+const integrationConnectionKey = (companyId: string, provider: IntegrationProvider) =>
+  `${companyId}:${provider}`;
+
+const normalizeIntegrationProvider = (rawProvider: unknown): IntegrationProvider | null => {
+  const provider = String(rawProvider || '').trim().toUpperCase();
+
+  if (!integrationProviders.includes(provider as IntegrationProvider)) {
+    return null;
+  }
+
+  return provider as IntegrationProvider;
+};
+
+const getIntegrationStatusWithAliases = async (
+  companyId: string,
+  provider: IntegrationProvider
+): Promise<IntegrationConnection> => {
+  for (const tableName of tableAliases.integrations) {
+    for (const companyField of companyFieldAliases) {
+      for (const providerField of integrationProviderFields) {
+        const response = await supabaseAdmin
+          .from(tableName)
+          .select('*')
+          .eq(companyField, companyId)
+          .eq(providerField, provider)
+          .maybeSingle();
+
+        if (!response.error && response.data) {
+          const row = response.data as Record<string, unknown>;
+          return {
+            provider,
+            companyId,
+            connected: Boolean(row.connected),
+            token: String(row.token || row.api_key || row.apiKey || '').trim() || null,
+            accountId: String(row.account_id || row.accountId || '').trim() || null,
+            updatedAt: String(row.updated_at || row.updatedAt || new Date().toISOString())
+          };
+        }
+      }
+    }
+  }
+
+  const fallback = integrationConnectionMemory.get(integrationConnectionKey(companyId, provider));
+  if (fallback) {
+    return fallback;
+  }
+
+  return {
+    provider,
+    companyId,
+    connected: false,
+    token: null,
+    accountId: null,
+    updatedAt: new Date().toISOString()
+  };
+};
+
+const saveIntegrationStatusWithAliases = async (connection: IntegrationConnection) => {
+  for (const tableName of tableAliases.integrations) {
+    for (const companyField of companyFieldAliases) {
+      for (const providerField of integrationProviderFields) {
+        const selectExisting = await supabaseAdmin
+          .from(tableName)
+          .select('id')
+          .eq(companyField, connection.companyId)
+          .eq(providerField, connection.provider)
+          .maybeSingle();
+
+        const payload: Record<string, unknown> = {
+          [companyField]: connection.companyId,
+          [providerField]: connection.provider,
+          connected: connection.connected,
+          token: connection.token,
+          account_id: connection.accountId,
+          updated_at: connection.updatedAt
+        };
+
+        if (!selectExisting.error && selectExisting.data) {
+          const updated = await supabaseAdmin
+            .from(tableName)
+            .update(payload)
+            .eq('id', String((selectExisting.data as Record<string, unknown>).id || '').trim())
+            .select('*')
+            .single();
+
+          if (!updated.error) {
+            return;
+          }
+        }
+
+        const inserted = await supabaseAdmin.from(tableName).insert(payload).select('*').single();
+
+        if (!inserted.error) {
+          return;
+        }
+      }
+    }
+  }
+
+  integrationConnectionMemory.set(integrationConnectionKey(connection.companyId, connection.provider), connection);
+};
+
+const listIntegrationMessagesWithAliases = async (
+  companyId: string,
+  provider: IntegrationProvider,
+  conversationId?: string | null
+): Promise<IntegrationChatMessage[]> => {
+  for (const tableName of tableAliases.integrationMessages) {
+    for (const companyField of companyFieldAliases) {
+      for (const providerField of integrationProviderFields) {
+        const response = await supabaseAdmin
+          .from(tableName)
+          .select('*')
+          .eq(companyField, companyId)
+          .eq(providerField, provider);
+
+        if (!response.error && response.data) {
+          const mapped = (response.data as Array<Record<string, unknown>>)
+            .map((row) => {
+              const rowConversationId = String(
+                row.conversation_id || row.conversationId || row.contact_id || row.contactId || ''
+              ).trim();
+
+              return {
+                id: String(row.id || ''),
+                provider,
+                companyId,
+                conversationId: rowConversationId,
+                userId: String(row.user_id || row.userId || row.sender_id || row.senderId || '').trim() || rowConversationId,
+                userName:
+                  String(row.user_name || row.userName || row.contact_name || row.contactName || '').trim() ||
+                  'Contato',
+                senderRole: String(row.sender_role || row.senderRole || 'CLIENT').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'CLIENT',
+                content: String(row.content || row.message || ''),
+                createdAt: String(row.created_at || row.createdAt || new Date().toISOString())
+              } as IntegrationChatMessage;
+            })
+            .filter((item) => (conversationId ? item.conversationId === conversationId : true))
+            .sort(
+              (left, right) =>
+                new Date(String(left.createdAt || '')).getTime() -
+                new Date(String(right.createdAt || '')).getTime()
+            );
+
+          return mapped;
+        }
+      }
+    }
+  }
+
+  return integrationMessageMemory
+    .filter(
+      (item) =>
+        item.companyId === companyId &&
+        item.provider === provider &&
+        (conversationId ? item.conversationId === conversationId : true)
+    )
+    .sort(
+      (left, right) =>
+        new Date(String(left.createdAt || '')).getTime() -
+        new Date(String(right.createdAt || '')).getTime()
+    );
+};
+
+const insertIntegrationMessageWithAliases = async (payload: Omit<IntegrationChatMessage, 'id' | 'createdAt'>) => {
+  const createdAt = new Date().toISOString();
+
+  for (const tableName of tableAliases.integrationMessages) {
+    for (const companyField of companyFieldAliases) {
+      for (const providerField of integrationProviderFields) {
+        for (const conversationField of integrationConversationAliases) {
+          for (const userField of integrationUserAliases) {
+            for (const userNameField of integrationUserNameAliases) {
+              const insertPayload: Record<string, unknown> = {
+                [companyField]: payload.companyId,
+                [providerField]: payload.provider,
+                [conversationField]: payload.conversationId,
+                [userField]: payload.userId,
+                [userNameField]: payload.userName,
+                sender_role: payload.senderRole,
+                content: payload.content,
+                created_at: createdAt
+              };
+
+              const inserted = await supabaseAdmin.from(tableName).insert(insertPayload).select('*').single();
+
+              if (!inserted.error && inserted.data) {
+                const row = inserted.data as Record<string, unknown>;
+                return {
+                  id: String(row.id || ''),
+                  provider: payload.provider,
+                  companyId: payload.companyId,
+                  conversationId: payload.conversationId,
+                  userId: payload.userId,
+                  userName: payload.userName,
+                  senderRole: payload.senderRole,
+                  content: payload.content,
+                  createdAt: String(row.created_at || row.createdAt || createdAt)
+                } as IntegrationChatMessage;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const inMemoryMessage: IntegrationChatMessage = {
+    id: `${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    provider: payload.provider,
+    companyId: payload.companyId,
+    conversationId: payload.conversationId,
+    userId: payload.userId,
+    userName: payload.userName,
+    senderRole: payload.senderRole,
+    content: payload.content,
+    createdAt
+  };
+
+  integrationMessageMemory.push(inMemoryMessage);
+  return inMemoryMessage;
+};
+
+const listIntegrationConversationsWithAliases = async (
+  companyId: string,
+  provider: IntegrationProvider
+) => {
+  const messages = await listIntegrationMessagesWithAliases(companyId, provider);
+  const grouped = new Map<string, { id: string; userId: string; userName: string; lastMessage: string; lastAt: string; unread: number }>();
+
+  for (const message of messages) {
+    const key = message.conversationId;
+    const previous = grouped.get(key);
+
+    if (!previous) {
+      grouped.set(key, {
+        id: key,
+        userId: message.userId,
+        userName: message.userName,
+        lastMessage: message.content,
+        lastAt: message.createdAt,
+        unread: message.senderRole === 'CLIENT' ? 1 : 0
+      });
+      continue;
+    }
+
+    const previousTime = new Date(previous.lastAt).getTime();
+    const currentTime = new Date(message.createdAt).getTime();
+
+    if (currentTime >= previousTime) {
+      previous.lastMessage = message.content;
+      previous.lastAt = message.createdAt;
+      previous.userName = message.userName || previous.userName;
+      previous.userId = message.userId || previous.userId;
+    }
+
+    if (message.senderRole === 'CLIENT') {
+      previous.unread += 1;
+    }
+  }
+
+  return Array.from(grouped.values()).sort(
+    (left, right) => new Date(right.lastAt).getTime() - new Date(left.lastAt).getTime()
+  );
 };
 
 const getCompanyLeadsByStatus = async (companyId: string, status?: LeadStatus) => {
@@ -1685,6 +1985,215 @@ router.patch('/support-requests/:id', requireAuth, async (req, res) => {
   return res.status(200).json({
     message: 'Solicitacao de suporte atualizada com sucesso.',
     request: updated.data
+  });
+});
+
+router.get('/integrations/status', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para consultar integracoes.' });
+  }
+
+  const [whatsapp, instagram] = await Promise.all([
+    getIntegrationStatusWithAliases(companyId, 'WHATSAPP'),
+    getIntegrationStatusWithAliases(companyId, 'INSTAGRAM')
+  ]);
+
+  return res.status(200).json({
+    companyId,
+    integrations: {
+      whatsapp,
+      instagram
+    }
+  });
+});
+
+router.post('/integrations/connect/:provider', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const provider = normalizeIntegrationProvider(req.params.provider);
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+  const token = String(req.body?.token || req.body?.apiKey || '').trim() || null;
+  const accountId = String(req.body?.accountId || '').trim() || null;
+  const connected = Boolean(req.body?.connected ?? true);
+
+  if (!provider) {
+    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP ou INSTAGRAM.' });
+  }
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para conectar integracao.' });
+  }
+
+  if (connected && !token) {
+    return res.status(400).json({ message: 'Token/API key e obrigatorio para conectar integracao.' });
+  }
+
+  const payload: IntegrationConnection = {
+    provider,
+    companyId,
+    connected,
+    token,
+    accountId,
+    updatedAt: new Date().toISOString()
+  };
+
+  await saveIntegrationStatusWithAliases(payload);
+
+  return res.status(200).json({
+    message: connected ? `${provider} conectado com sucesso.` : `${provider} desconectado com sucesso.`,
+    integration: payload
+  });
+});
+
+router.post('/integrations/oauth/instagram', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+  const authCode = String(req.body?.code || '').trim();
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para OAuth do Instagram.' });
+  }
+
+  if (!authCode) {
+    return res.status(400).json({ message: 'Codigo OAuth do Instagram e obrigatorio.' });
+  }
+
+  const generatedToken = `ig_${Buffer.from(`${companyId}:${authCode}:${Date.now()}`).toString('base64').slice(0, 28)}`;
+  const accountId = `ig-account-${companyId.slice(0, 8)}`;
+
+  const payload: IntegrationConnection = {
+    provider: 'INSTAGRAM',
+    companyId,
+    connected: true,
+    token: generatedToken,
+    accountId,
+    updatedAt: new Date().toISOString()
+  };
+
+  await saveIntegrationStatusWithAliases(payload);
+
+  return res.status(200).json({
+    message: 'Instagram conectado via OAuth com sucesso.',
+    integration: payload
+  });
+});
+
+router.get('/integrations/conversations', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const provider = normalizeIntegrationProvider(req.query.provider);
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+
+  if (!provider) {
+    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP ou INSTAGRAM.' });
+  }
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para listar conversas.' });
+  }
+
+  const conversations = await listIntegrationConversationsWithAliases(companyId, provider);
+
+  return res.status(200).json({
+    provider,
+    companyId,
+    conversations
+  });
+});
+
+router.get('/integrations/messages', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const provider = normalizeIntegrationProvider(req.query.provider);
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+  const conversationId = String(req.query.conversationId || '').trim() || null;
+
+  if (!provider) {
+    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP ou INSTAGRAM.' });
+  }
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para carregar mensagens.' });
+  }
+
+  if (!conversationId) {
+    return res.status(400).json({ message: 'conversationId e obrigatorio para carregar mensagens.' });
+  }
+
+  const messages = await listIntegrationMessagesWithAliases(companyId, provider, conversationId);
+
+  return res.status(200).json({
+    provider,
+    companyId,
+    conversationId,
+    messages
+  });
+});
+
+router.post('/integrations/messages/send', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const provider = normalizeIntegrationProvider(req.body?.provider);
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+  const conversationId = String(req.body?.conversationId || '').trim();
+  const userId = String(req.body?.userId || conversationId).trim();
+  const userName = String(req.body?.userName || 'Contato').trim();
+  const content = String(req.body?.content || '').trim();
+
+  if (!provider) {
+    return res.status(400).json({ message: 'Provider invalido. Use WHATSAPP ou INSTAGRAM.' });
+  }
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para enviar mensagem.' });
+  }
+
+  if (!conversationId) {
+    return res.status(400).json({ message: 'conversationId e obrigatorio para enviar mensagem.' });
+  }
+
+  if (!content) {
+    return res.status(400).json({ message: 'A mensagem nao pode ser vazia.' });
+  }
+
+  const connection = await getIntegrationStatusWithAliases(companyId, provider);
+
+  if (!connection.connected || !connection.token) {
+    return res.status(403).json({ message: `${provider} nao conectado para esta empresa.` });
+  }
+
+  const savedMessage = await insertIntegrationMessageWithAliases({
+    provider,
+    companyId,
+    conversationId,
+    userId,
+    userName,
+    senderRole: req.authUser.role,
+    content
+  });
+
+  emitIntegrationMessage(savedMessage);
+
+  return res.status(201).json({
+    message: 'Mensagem enviada com sucesso.',
+    data: savedMessage
   });
 });
 

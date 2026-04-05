@@ -23,6 +23,20 @@ type SupportChatMessage = {
   createdAt: string;
 };
 
+type IntegrationProvider = 'WHATSAPP' | 'INSTAGRAM';
+
+type IntegrationChatMessage = {
+  id: string;
+  companyId: string;
+  provider: IntegrationProvider;
+  conversationId: string;
+  userId: string;
+  userName: string;
+  content: string;
+  senderRole: 'ADMIN' | 'CLIENT';
+  createdAt: string;
+};
+
 const supportMessageTables = ['messages', 'Message'];
 const companyFieldAliases = ['company_id', 'companyId', 'companyID'];
 
@@ -30,6 +44,8 @@ let ioInstance: SocketServer | null = null;
 const presenceByCompany = new Map<string, { admins: Set<string>; clients: Set<string> }>();
 
 const roomName = (companyId: string) => `support:${companyId}`;
+const integrationRoomName = (provider: IntegrationProvider, companyId: string) =>
+  `integration:${provider}:${companyId}`;
 const supportRequestTagRegex = /^\[REQ:([^\]]+)\]\s*/;
 
 const encodeSupportMessageContent = (requestId: string | null, content: string) => {
@@ -135,6 +151,16 @@ export const emitSupportMessage = (message: SupportChatMessage) => {
   }
 
   ioInstance.to(roomName(message.companyId)).emit('support:new-message', message);
+};
+
+export const emitIntegrationMessage = (message: IntegrationChatMessage) => {
+  if (!ioInstance) {
+    return;
+  }
+
+  ioInstance
+    .to(integrationRoomName(message.provider, message.companyId))
+    .emit('integration:new-message', message);
 };
 
 const resolveCompanyForSocket = (user: ConnectedUser, payloadCompanyId: unknown) => {
@@ -252,6 +278,25 @@ export const initSocketGateway = (httpServer: HttpServer) => {
         userRole: user.role,
         isTyping: Boolean(payload?.isTyping)
       });
+    });
+
+    socket.on('integration:join', (payload: { companyId?: string; provider?: string }) => {
+      const companyId = resolveCompanyForSocket(user, payload?.companyId);
+      const providerRaw = String(payload?.provider || '').trim().toUpperCase();
+
+      if (!companyId) {
+        socket.emit('integration:error', {
+          message: 'Empresa nao informada para entrar no chat de integracao.'
+        });
+        return;
+      }
+
+      if (!['WHATSAPP', 'INSTAGRAM'].includes(providerRaw)) {
+        socket.emit('integration:error', { message: 'Provider invalido para chat de integracao.' });
+        return;
+      }
+
+      socket.join(integrationRoomName(providerRaw as IntegrationProvider, companyId));
     });
 
     socket.on('support:send-message', async (payload: { companyId?: string; requestId?: string; content?: string }) => {

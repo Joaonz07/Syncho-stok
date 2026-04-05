@@ -163,7 +163,7 @@ type AdminPlanConfig = {
   features: string[];
 };
 
-type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat' | 'analytics' | 'admin';
+type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat' | 'analytics' | 'admin' | 'integrations';
 
 type SidebarGroup = 'Comercial' | 'Operacao' | 'Sistema';
 
@@ -197,6 +197,38 @@ type SupportChatMessage = {
   requestId: string | null;
   senderId: string;
   senderName: string;
+  senderRole: 'ADMIN' | 'CLIENT';
+  content: string;
+  createdAt: string;
+};
+
+type IntegrationProvider = 'WHATSAPP' | 'INSTAGRAM';
+
+type IntegrationConnection = {
+  provider: IntegrationProvider;
+  companyId: string;
+  connected: boolean;
+  token: string | null;
+  accountId: string | null;
+  updatedAt: string;
+};
+
+type IntegrationConversation = {
+  id: string;
+  userId: string;
+  userName: string;
+  lastMessage: string;
+  lastAt: string;
+  unread: number;
+};
+
+type IntegrationMessage = {
+  id: string;
+  provider: IntegrationProvider;
+  companyId: string;
+  conversationId: string;
+  userId: string;
+  userName: string;
   senderRole: 'ADMIN' | 'CLIENT';
   content: string;
   createdAt: string;
@@ -729,6 +761,20 @@ const Dashboard = () => {
   const [supportAdminOnline, setSupportAdminOnline] = useState(false);
   const [supportTypingText, setSupportTypingText] = useState('');
   const [supportUnreadCount, setSupportUnreadCount] = useState(0);
+  const [integrationProvider, setIntegrationProvider] = useState<IntegrationProvider>('WHATSAPP');
+  const [integrationsCompanyId, setIntegrationsCompanyId] = useState('');
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [whatsappTokenInput, setWhatsappTokenInput] = useState('');
+  const [instagramOAuthCode, setInstagramOAuthCode] = useState('');
+  const [integrationConnections, setIntegrationConnections] = useState<{
+    whatsapp: IntegrationConnection | null;
+    instagram: IntegrationConnection | null;
+  }>({ whatsapp: null, instagram: null });
+  const [integrationConversations, setIntegrationConversations] = useState<IntegrationConversation[]>([]);
+  const [selectedIntegrationConversationId, setSelectedIntegrationConversationId] = useState<string | null>(null);
+  const [integrationMessages, setIntegrationMessages] = useState<IntegrationMessage[]>([]);
+  const [integrationReply, setIntegrationReply] = useState('');
+  const integrationProviderRef = useRef<IntegrationProvider>('WHATSAPP');
   const [adminSection, setAdminSection] = useState<'overview' | 'companies' | 'users' | 'plans' | 'support'>('overview');
   const [planCatalog, setPlanCatalog] = useState<AdminPlanConfig[]>(() => {
     if (typeof window === 'undefined') {
@@ -2093,6 +2139,295 @@ const Dashboard = () => {
     }
   };
 
+  const getIntegrationsTargetCompanyId = () => {
+    return getTargetCompanyId(integrationsCompanyId || settingsCompanyId);
+  };
+
+  const fetchIntegrationStatus = async () => {
+    if (!token) {
+      return;
+    }
+
+    const targetCompanyId = getIntegrationsTargetCompanyId();
+
+    if (!targetCompanyId) {
+      setStatus('Selecione uma empresa para carregar integracoes.');
+      return;
+    }
+
+    setIntegrationLoading(true);
+
+    try {
+      const response = await fetch(
+        `/api/dashboard/integrations/status?companyId=${encodeURIComponent(targetCompanyId)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao carregar status de integracoes.');
+        return;
+      }
+
+      setIntegrationConnections({
+        whatsapp: (result.integrations?.whatsapp || null) as IntegrationConnection | null,
+        instagram: (result.integrations?.instagram || null) as IntegrationConnection | null
+      });
+    } catch (_error) {
+      setStatus('Erro de rede ao carregar status de integracoes.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const connectWhatsApp = async () => {
+    if (!token) {
+      return;
+    }
+
+    const targetCompanyId = getIntegrationsTargetCompanyId();
+    const tokenValue = whatsappTokenInput.trim();
+
+    if (!targetCompanyId) {
+      setStatus('Selecione uma empresa para conectar WhatsApp.');
+      return;
+    }
+
+    if (!tokenValue) {
+      setStatus('Informe o token/API key do WhatsApp.');
+      return;
+    }
+
+    setIntegrationLoading(true);
+
+    try {
+      const response = await fetch('/api/dashboard/integrations/connect/WHATSAPP', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ companyId: targetCompanyId, token: tokenValue, connected: true })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao conectar WhatsApp.');
+        return;
+      }
+
+      setWhatsappTokenInput('');
+      setStatus('WhatsApp conectado com sucesso.');
+      showToast('WhatsApp conectado');
+      await fetchIntegrationStatus();
+    } catch (_error) {
+      setStatus('Erro de rede ao conectar WhatsApp.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const connectInstagramOAuth = async () => {
+    if (!token) {
+      return;
+    }
+
+    const targetCompanyId = getIntegrationsTargetCompanyId();
+    const code = instagramOAuthCode.trim();
+
+    if (!targetCompanyId) {
+      setStatus('Selecione uma empresa para conectar Instagram.');
+      return;
+    }
+
+    if (!code) {
+      setStatus('Informe o codigo OAuth do Instagram/Meta.');
+      return;
+    }
+
+    setIntegrationLoading(true);
+
+    try {
+      const response = await fetch('/api/dashboard/integrations/oauth/instagram', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ companyId: targetCompanyId, code })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao conectar Instagram.');
+        return;
+      }
+
+      setInstagramOAuthCode('');
+      setStatus('Instagram conectado com sucesso.');
+      showToast('Instagram conectado');
+      await fetchIntegrationStatus();
+    } catch (_error) {
+      setStatus('Erro de rede ao conectar Instagram.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const disconnectIntegration = async (provider: IntegrationProvider) => {
+    if (!token) {
+      return;
+    }
+
+    const targetCompanyId = getIntegrationsTargetCompanyId();
+
+    if (!targetCompanyId) {
+      setStatus('Selecione uma empresa para desconectar a integracao.');
+      return;
+    }
+
+    setIntegrationLoading(true);
+
+    try {
+      const response = await fetch(`/api/dashboard/integrations/connect/${provider}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ companyId: targetCompanyId, connected: false })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || `Falha ao desconectar ${provider}.`);
+        return;
+      }
+
+      setStatus(`${provider} desconectado com sucesso.`);
+      showToast(`${provider} desconectado`);
+      await fetchIntegrationStatus();
+    } catch (_error) {
+      setStatus(`Erro de rede ao desconectar ${provider}.`);
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const fetchIntegrationConversations = async () => {
+    if (!token) {
+      return;
+    }
+
+    const targetCompanyId = getIntegrationsTargetCompanyId();
+
+    if (!targetCompanyId) {
+      setIntegrationConversations([]);
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/dashboard/integrations/conversations?companyId=${encodeURIComponent(targetCompanyId)}&provider=${integrationProvider}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao carregar conversas de integracao.');
+        return;
+      }
+
+      setIntegrationConversations((result.conversations || []) as IntegrationConversation[]);
+    } catch (_error) {
+      setStatus('Erro de rede ao carregar conversas de integracao.');
+    }
+  };
+
+  const fetchIntegrationMessages = async (conversationId: string | null = selectedIntegrationConversationId) => {
+    if (!token || !conversationId) {
+      setIntegrationMessages([]);
+      return;
+    }
+
+    const targetCompanyId = getIntegrationsTargetCompanyId();
+
+    if (!targetCompanyId) {
+      setIntegrationMessages([]);
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/dashboard/integrations/messages?companyId=${encodeURIComponent(targetCompanyId)}&provider=${integrationProvider}&conversationId=${encodeURIComponent(conversationId)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao carregar mensagens da integracao.');
+        return;
+      }
+
+      setIntegrationMessages((result.messages || []) as IntegrationMessage[]);
+    } catch (_error) {
+      setStatus('Erro de rede ao carregar mensagens da integracao.');
+    }
+  };
+
+  const sendIntegrationMessage = async () => {
+    if (!token) {
+      return;
+    }
+
+    const targetCompanyId = getIntegrationsTargetCompanyId();
+    const conversation = integrationConversations.find((item) => item.id === selectedIntegrationConversationId);
+    const content = integrationReply.trim();
+
+    if (!targetCompanyId || !conversation || !content) {
+      return;
+    }
+
+    setIntegrationReply('');
+
+    try {
+      const response = await fetch('/api/dashboard/integrations/messages/send', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          companyId: targetCompanyId,
+          provider: integrationProvider,
+          conversationId: conversation.id,
+          userId: conversation.userId,
+          userName: conversation.userName,
+          content
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao enviar mensagem da integracao.');
+        return;
+      }
+
+      setIntegrationMessages((current) => {
+        const incoming = result.data as IntegrationMessage;
+        if (!incoming || current.some((item) => item.id === incoming.id)) {
+          return current;
+        }
+
+        return [...current, incoming];
+      });
+
+      await fetchIntegrationConversations();
+    } catch (_error) {
+      setStatus('Erro de rede ao enviar mensagem da integracao.');
+    }
+  };
+
   const fetchSalesAnalysis = async (options?: { silent?: boolean }) => {
     if (!token) {
       return;
@@ -2208,6 +2543,17 @@ const Dashboard = () => {
   }, [activeView, token, settingsCompanyId]);
 
   useEffect(() => {
+    if (activeView === 'integrations') {
+      void fetchIntegrationStatus();
+      void fetchIntegrationConversations();
+
+      if (selectedIntegrationConversationId) {
+        void fetchIntegrationMessages(selectedIntegrationConversationId);
+      }
+    }
+  }, [activeView, token, integrationProvider, integrationsCompanyId, selectedIntegrationConversationId]);
+
+  useEffect(() => {
     if (activeView === 'chat') {
       setSupportUnreadCount(0);
       void fetchSupportRequests();
@@ -2224,6 +2570,10 @@ const Dashboard = () => {
       void fetchSupportRequests();
     }
   }, [activeView, role, token]);
+
+  useEffect(() => {
+    integrationProviderRef.current = integrationProvider;
+  }, [integrationProvider]);
 
   useEffect(() => {
     if (!token) {
@@ -2305,6 +2655,28 @@ const Dashboard = () => {
       }
     });
 
+    socket.on('integration:new-message', (incoming: IntegrationMessage) => {
+      if (incoming.provider !== integrationProviderRef.current) {
+        return;
+      }
+
+      setIntegrationMessages((current) => {
+        if (current.some((msg) => msg.id === incoming.id)) {
+          return current;
+        }
+
+        return [...current, incoming];
+      });
+
+      void fetchIntegrationConversations();
+    });
+
+    socket.on('integration:error', (payload: { message?: string }) => {
+      if (payload?.message) {
+        setStatus(payload.message);
+      }
+    });
+
     return () => {
       socket.off('connect');
       socket.off('disconnect');
@@ -2312,6 +2684,8 @@ const Dashboard = () => {
       socket.off('support:presence');
       socket.off('support:typing');
       socket.off('support:error');
+      socket.off('integration:new-message');
+      socket.off('integration:error');
       socket.disconnect();
       supportSocketRef.current = null;
       setSupportChatConnected(false);
@@ -2334,6 +2708,23 @@ const Dashboard = () => {
 
     supportSocketRef.current.emit('support:join', { companyId: targetCompanyId });
   }, [activeView, settingsCompanyId]);
+
+  useEffect(() => {
+    if (activeView !== 'integrations') {
+      return;
+    }
+
+    const targetCompanyId = getIntegrationsTargetCompanyId();
+
+    if (!targetCompanyId || !supportSocketRef.current?.connected) {
+      return;
+    }
+
+    supportSocketRef.current.emit('integration:join', {
+      companyId: targetCompanyId,
+      provider: integrationProvider
+    });
+  }, [activeView, integrationProvider, integrationsCompanyId, settingsCompanyId]);
 
   useEffect(() => {
     if (activeView === 'sales') {
@@ -3341,7 +3732,7 @@ const Dashboard = () => {
     { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
     { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
     { name: 'Estoque', icon: Boxes, path: 'inventory', group: 'Operacao' },
-    { name: 'Integracoes', icon: Plug, path: 'settings', group: 'Operacao' },
+    { name: 'Integracoes', icon: Plug, path: 'integrations', group: 'Operacao' },
     { name: 'Chat / Suporte', icon: MessageCircle, path: 'chat', group: 'Sistema' },
     { name: 'Planos', icon: CreditCard, path: 'settings', group: 'Sistema', adminOnly: true },
     { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema' }
@@ -3505,6 +3896,7 @@ const Dashboard = () => {
             { key: 'sales' as const, icon: BarChart3, label: 'Vendas' },
             { key: 'products' as const, icon: Package, label: 'Produtos' },
             { key: 'inventory' as const, icon: Boxes, label: 'Estoque' },
+            { key: 'integrations' as const, icon: Plug, label: 'Integr.' },
             ...(role === 'ADMIN' ? [
               { key: 'admin' as const, icon: Sparkles, label: 'Admin' },
               { key: 'companies' as const, icon: LayoutDashboard, label: 'Empresas' },
@@ -4829,6 +5221,308 @@ const Dashboard = () => {
                 </div>
               </div>
             </div>
+          ) : null}
+
+          {activeView === 'integrations' ? (
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="grid gap-6"
+            >
+              <div className={[
+                'rounded-2xl border p-5 shadow-xl',
+                isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(34,211,238,0.12)]' : 'border-slate-200 bg-white'
+              ].join(' ')}>
+                <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Integracoes</h1>
+                <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                  Conecte WhatsApp e Instagram para centralizar mensagens em tempo real.
+                </p>
+
+                {role === 'ADMIN' ? (
+                  <div className="mt-4 max-w-sm">
+                    <select
+                      className={themedSelectClass}
+                      value={integrationsCompanyId}
+                      onChange={(event) => setIntegrationsCompanyId(event.target.value)}
+                    >
+                      <option className={themedOptionClass} value="">Selecione a empresa</option>
+                      {companyOptions.map((option) => (
+                        <option className={themedOptionClass} key={option.id} value={option.id}>{option.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                <motion.div
+                  whileHover={{ y: -3 }}
+                  className={[
+                    'rounded-2xl border p-5',
+                    isDarkTheme ? 'border-emerald-500/20 bg-[#0d1117] shadow-[0_0_18px_rgba(16,185,129,0.14)]' : 'border-slate-200 bg-white'
+                  ].join(' ')}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h2 className={['text-base font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>WhatsApp Integration</h2>
+                      <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                        Token/API key para envio e resposta de mensagens.
+                      </p>
+                    </div>
+                    <span className={[
+                      'rounded-full px-2 py-0.5 text-xs font-semibold',
+                      integrationConnections.whatsapp?.connected
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : 'bg-rose-500/15 text-rose-300'
+                    ].join(' ')}>
+                      {integrationConnections.whatsapp?.connected ? 'Connected' : 'Not connected'}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid gap-3">
+                    <input
+                      className={themedInputClass}
+                      placeholder="Informe token/API key do WhatsApp"
+                      value={whatsappTokenInput}
+                      onChange={(event) => setWhatsappTokenInput(event.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={connectWhatsApp}
+                        disabled={integrationLoading}
+                        className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-emerald-500 disabled:opacity-70"
+                      >
+                        Connect WhatsApp
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void disconnectIntegration('WHATSAPP')}
+                        disabled={integrationLoading}
+                        className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-70' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-70'}
+                      >
+                        Desconectar
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+
+                <motion.div
+                  whileHover={{ y: -3 }}
+                  className={[
+                    'rounded-2xl border p-5',
+                    isDarkTheme ? 'border-purple-500/20 bg-[#0d1117] shadow-[0_0_18px_rgba(168,85,247,0.14)]' : 'border-slate-200 bg-white'
+                  ].join(' ')}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h2 className={['text-base font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Instagram Integration (Meta OAuth)</h2>
+                      <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                        Conecte via OAuth para leitura e resposta de mensagens.
+                      </p>
+                    </div>
+                    <span className={[
+                      'rounded-full px-2 py-0.5 text-xs font-semibold',
+                      integrationConnections.instagram?.connected
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : 'bg-rose-500/15 text-rose-300'
+                    ].join(' ')}>
+                      {integrationConnections.instagram?.connected ? 'Connected' : 'Not connected'}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid gap-3">
+                    <input
+                      className={themedInputClass}
+                      placeholder="Cole o code OAuth do Instagram"
+                      value={instagramOAuthCode}
+                      onChange={(event) => setInstagramOAuthCode(event.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={connectInstagramOAuth}
+                        disabled={integrationLoading}
+                        className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-purple-500 disabled:opacity-70"
+                      >
+                        Connect Instagram (Meta OAuth)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void disconnectIntegration('INSTAGRAM')}
+                        disabled={integrationLoading}
+                        className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-70' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-70'}
+                      >
+                        Desconectar
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+
+              <div className={[
+                'rounded-2xl border p-5',
+                isDarkTheme ? 'border-blue-500/20 bg-[#0d1117] shadow-[0_0_18px_rgba(59,130,246,0.12)]' : 'border-slate-200 bg-white'
+              ].join(' ')}>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Chat de Integracoes</h3>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                      Conversas agrupadas por usuario com resposta em tempo real.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {(['WHATSAPP', 'INSTAGRAM'] as IntegrationProvider[]).map((provider) => (
+                      <button
+                        key={provider}
+                        type="button"
+                        onClick={() => {
+                          setIntegrationProvider(provider);
+                          setSelectedIntegrationConversationId(null);
+                          setIntegrationMessages([]);
+                        }}
+                        className={[
+                          'rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all',
+                          integrationProvider === provider
+                            ? isDarkTheme ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-300' : 'border-blue-300 bg-blue-50 text-blue-700'
+                            : isDarkTheme ? 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        ].join(' ')}
+                      >
+                        {provider === 'WHATSAPP' ? 'WhatsApp' : 'Instagram'}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void fetchIntegrationConversations();
+                        if (selectedIntegrationConversationId) {
+                          void fetchIntegrationMessages(selectedIntegrationConversationId);
+                        }
+                      }}
+                      className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'}
+                    >
+                      Atualizar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+                  <div className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5' : 'rounded-xl border border-slate-200 bg-white'}>
+                    <div className={['border-b px-4 py-3 text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'border-white/10 text-slate-400' : 'border-slate-100 text-slate-500'].join(' ')}>
+                      Conversas
+                    </div>
+                    <div className="max-h-[420px] overflow-y-auto">
+                      {integrationConversations.length ? (
+                        integrationConversations.map((conversation) => {
+                          const selected = selectedIntegrationConversationId === conversation.id;
+                          return (
+                            <button
+                              key={conversation.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedIntegrationConversationId(conversation.id);
+                                void fetchIntegrationMessages(conversation.id);
+                              }}
+                              className={[
+                                'w-full border-b px-4 py-3 text-left transition-all',
+                                isDarkTheme ? 'border-white/5' : 'border-slate-100',
+                                selected
+                                  ? isDarkTheme ? 'bg-cyan-500/10' : 'bg-blue-50'
+                                  : isDarkTheme ? 'hover:bg-white/5' : 'hover:bg-slate-50'
+                              ].join(' ')}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <p className={['truncate text-sm font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{conversation.userName}</p>
+                                {conversation.unread > 0 ? (
+                                  <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold text-rose-300">{conversation.unread}</span>
+                                ) : null}
+                              </div>
+                              <p className={['mt-1 truncate text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>{conversation.lastMessage}</p>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p className={['px-4 py-6 text-center text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                          Nenhuma conversa encontrada para este canal.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={isDarkTheme ? 'flex flex-col rounded-xl border border-white/10 bg-white/5' : 'flex flex-col rounded-xl border border-slate-200 bg-white'}>
+                    <div className={['border-b px-4 py-3', isDarkTheme ? 'border-white/10' : 'border-slate-100'].join(' ')}>
+                      <p className={['text-sm font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>
+                        {selectedIntegrationConversationId
+                          ? integrationConversations.find((item) => item.id === selectedIntegrationConversationId)?.userName || 'Conversa'
+                          : 'Selecione uma conversa'}
+                      </p>
+                    </div>
+
+                    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4" style={{ minHeight: '300px', maxHeight: '420px' }}>
+                      {selectedIntegrationConversationId ? (
+                        integrationMessages.length ? (
+                          integrationMessages.map((message) => {
+                            const isMine = message.senderRole === role;
+                            return (
+                              <div key={message.id} className={['flex', isMine ? 'justify-end' : 'justify-start'].join(' ')}>
+                                <div className={[
+                                  'max-w-[80%] rounded-2xl px-3 py-2',
+                                  isMine
+                                    ? 'rounded-br-md bg-cyan-600 text-white'
+                                    : isDarkTheme ? 'rounded-bl-md bg-slate-700/60 text-slate-100' : 'rounded-bl-md bg-slate-100 text-slate-800'
+                                ].join(' ')}>
+                                  <p className={['text-[11px] font-semibold opacity-80', isMine ? 'text-cyan-100' : isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                                    {message.userName} · {message.senderRole}
+                                  </p>
+                                  <p className="mt-0.5 text-sm whitespace-pre-wrap">{message.content}</p>
+                                  <p className={['mt-1 text-right text-[10px] opacity-70', isMine ? 'text-cyan-100' : ''].join(' ')}>{String(message.createdAt || '').slice(11, 16)}</p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <p className={['py-10 text-center text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                            Nenhuma mensagem nesta conversa.
+                          </p>
+                        )
+                      ) : (
+                        <p className={['py-10 text-center text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                          Escolha uma conversa para responder.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className={['flex gap-2 border-t p-3', isDarkTheme ? 'border-white/10' : 'border-slate-100'].join(' ')}>
+                      <input
+                        className={[
+                          'flex-1 rounded-xl border px-3 py-2 text-sm outline-none transition-all',
+                          isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-cyan-400' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400'
+                        ].join(' ')}
+                        placeholder="Digite sua resposta..."
+                        value={integrationReply}
+                        onChange={(event) => setIntegrationReply(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault();
+                            void sendIntegrationMessage();
+                          }
+                        }}
+                        disabled={!selectedIntegrationConversationId}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void sendIntegrationMessage()}
+                        disabled={!selectedIntegrationConversationId || !integrationReply.trim()}
+                        className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500 disabled:opacity-60"
+                      >
+                        Responder
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
           ) : null}
 
           {activeView === 'settings' ? (
@@ -6223,7 +6917,7 @@ const Dashboard = () => {
             </div>
           ) : null}
 
-          {role === 'ADMIN' || activeView === 'products' || activeView === 'inventory' || activeView === 'settings' || activeView === 'chat' || activeView === 'sales' || activeView === 'analytics' ? (
+          {role === 'ADMIN' || activeView === 'products' || activeView === 'inventory' || activeView === 'settings' || activeView === 'chat' || activeView === 'sales' || activeView === 'analytics' || activeView === 'integrations' ? (
             <p className={['mt-4 text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>{adminLoading ? 'Sincronizando área administrativa...' : status}</p>
           ) : null}
 
