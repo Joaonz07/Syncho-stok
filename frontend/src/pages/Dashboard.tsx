@@ -427,25 +427,13 @@ const Dashboard = () => {
   }, [filteredLeads]);
 
   const funnelSellerOptions = useMemo(() => {
-    const fromUsers = managedUsers
+    return managedUsers
       .filter((user) => user.role === 'CLIENT')
       .map((user) => ({
         id: String(user.id || '').trim(),
         name: String(user.name || user.email || '').trim() || 'Vendedor'
       }))
       .filter((user) => user.id);
-
-    if (fromUsers.length) {
-      return fromUsers;
-    }
-
-    return [
-      { id: 'seller-alpha', name: 'Equipe Alfa' },
-      { id: 'seller-bravo', name: 'Equipe Bravo' },
-      { id: 'seller-charlie', name: 'Equipe Charlie' },
-      { id: 'seller-delta', name: 'Equipe Delta' },
-      { id: 'seller-echo', name: 'Equipe Echo' }
-    ];
   }, [managedUsers]);
 
   const funnelLeadsEnriched = useMemo(() => {
@@ -453,14 +441,16 @@ const Dashboard = () => {
 
     return leads.map((lead) => {
       const source = inferLeadSource(lead);
-      const seller = funnelSellerOptions[hashString(lead.id) % funnelSellerOptions.length];
+      const seller = funnelSellerOptions.length
+        ? funnelSellerOptions[hashString(lead.id) % funnelSellerOptions.length]
+        : null;
       const stageIndex = stageIndexMap.get(lead.status) ?? 0;
 
       return {
         lead,
         source,
-        sellerId: seller.id,
-        sellerName: seller.name,
+        sellerId: seller?.id || '',
+        sellerName: seller?.name || 'Nao atribuido',
         stageIndex,
         estimatedSalesValue: Number(lead.value || 0) * (lead.status === 'FECHAMENTO' ? 1 : 0.35 + stageIndex * 0.13)
       };
@@ -516,12 +506,22 @@ const Dashboard = () => {
     return new Set(funnelSellersAnalytics.filter((seller) => !disabled.has(seller.id)).map((seller) => seller.id));
   }, [disabledSellerIds, funnelSellersAnalytics]);
 
+  const isSellerEnabled = (sellerId: string) => {
+    if (!funnelSellersAnalytics.length) {
+      return true;
+    }
+
+    return enabledSellerSet.has(sellerId);
+  };
+
   const fullTotals = useMemo(() => ({
     totalSales:
       Number(salesAnalysis?.totalRevenue || 0) ||
       funnelSellersAnalytics.reduce((acc, seller) => acc + seller.salesVolume, 0),
-    totalLeads: funnelSellersAnalytics.reduce((acc, seller) => acc + seller.leadsCount, 0)
-  }), [funnelSellersAnalytics, salesAnalysis]);
+    totalLeads:
+      funnelSellersAnalytics.reduce((acc, seller) => acc + seller.leadsCount, 0) ||
+      leads.length
+  }), [funnelSellersAnalytics, salesAnalysis, leads.length]);
 
   const enabledTotals = useMemo(() => ({
     totalSales: Math.max(
@@ -531,10 +531,12 @@ const Dashboard = () => {
           .filter((seller) => !enabledSellerSet.has(seller.id))
           .reduce((acc, seller) => acc + seller.salesVolume, 0)
     ),
-    totalLeads: funnelSellersAnalytics
-      .filter((seller) => enabledSellerSet.has(seller.id))
-      .reduce((acc, seller) => acc + seller.leadsCount, 0)
-  }), [enabledSellerSet, funnelSellersAnalytics, fullTotals.totalSales]);
+    totalLeads:
+      funnelSellersAnalytics
+        .filter((seller) => enabledSellerSet.has(seller.id))
+        .reduce((acc, seller) => acc + seller.leadsCount, 0) ||
+      leads.length
+  }), [enabledSellerSet, funnelSellersAnalytics, fullTotals.totalSales, leads.length]);
 
   const salesDropPercent = useMemo(() => {
     if (!fullTotals.totalSales) {
@@ -554,7 +556,7 @@ const Dashboard = () => {
 
   const funnelBySource = useMemo(() => {
     return acquisitionSources.map((source) => {
-      const entries = funnelLeadsEnriched.filter((item) => item.source === source && enabledSellerSet.has(item.sellerId));
+      const entries = funnelLeadsEnriched.filter((item) => item.source === source && isSellerEnabled(item.sellerId));
       const totalSales = entries.reduce((acc, item) => acc + item.estimatedSalesValue, 0);
 
       return {
@@ -563,7 +565,7 @@ const Dashboard = () => {
         sales: totalSales
       };
     });
-  }, [enabledSellerSet, funnelLeadsEnriched]);
+  }, [enabledSellerSet, funnelLeadsEnriched, funnelSellersAnalytics]);
 
   const totalSalesBySource = useMemo(
     () => Math.max(1, funnelBySource.reduce((acc, item) => acc + item.sales, 0)),
@@ -592,7 +594,7 @@ const Dashboard = () => {
   }, [sourceShareData]);
 
   const stageAverageDays = useMemo(() => {
-    const activeEntries = funnelLeadsEnriched.filter((item) => enabledSellerSet.has(item.sellerId));
+    const activeEntries = funnelLeadsEnriched.filter((item) => isSellerEnabled(item.sellerId));
     const total = Math.max(1, activeEntries.length);
 
     return salesStages.map((stage, stageIndex) => {
@@ -606,7 +608,7 @@ const Dashboard = () => {
         avgDays: Number(adjustedDays.toFixed(1))
       };
     });
-  }, [enabledSellerSet, funnelLeadsEnriched]);
+  }, [enabledSellerSet, funnelLeadsEnriched, funnelSellersAnalytics]);
 
   const heatmapMax = useMemo(
     () => Math.max(1, ...funnelSellersAnalytics.flatMap((seller) => seller.rejectionByStage)),
@@ -614,7 +616,7 @@ const Dashboard = () => {
   );
 
   const funnelDiagramData = useMemo(() => {
-    const activeEntries = funnelLeadsEnriched.filter((item) => enabledSellerSet.has(item.sellerId));
+    const activeEntries = funnelLeadsEnriched.filter((item) => isSellerEnabled(item.sellerId));
     const total = Math.max(1, activeEntries.length);
 
     return salesStages.map((stage, stageIndex) => {
@@ -630,7 +632,7 @@ const Dashboard = () => {
         avgActionSize
       };
     });
-  }, [enabledSellerSet, funnelLeadsEnriched]);
+  }, [enabledSellerSet, funnelLeadsEnriched, funnelSellersAnalytics]);
 
   const toggleSellerEnabled = (sellerId: string) => {
     setDisabledSellerIds((current) => {
@@ -2663,39 +2665,45 @@ const Dashboard = () => {
                 </p>
 
                 <div className="mt-3 grid gap-2">
-                  {funnelSellersAnalytics.map((seller) => {
-                    const isDisabled = disabledSellerIds.includes(seller.id);
+                  {funnelSellersAnalytics.length ? (
+                    funnelSellersAnalytics.map((seller) => {
+                      const isDisabled = disabledSellerIds.includes(seller.id);
 
-                    return (
-                      <div
-                        key={seller.id}
-                        className={[
-                          'rounded-lg border p-2 transition-all',
-                          isDarkTheme ? 'border-white/10 bg-black/15' : 'border-slate-200 bg-slate-50'
-                        ].join(' ')}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{seller.name}</p>
-                          <button
-                            type="button"
-                            onClick={() => toggleSellerEnabled(seller.id)}
-                            className={[
-                              'rounded-md px-2 py-1 text-[10px] font-semibold uppercase',
-                              isDisabled
-                                ? 'bg-rose-500/20 text-rose-300'
-                                : 'bg-emerald-500/20 text-emerald-300'
-                            ].join(' ')}
-                          >
-                            {isDisabled ? 'Desabilitado' : 'Habilitado'}
-                          </button>
+                      return (
+                        <div
+                          key={seller.id}
+                          className={[
+                            'rounded-lg border p-2 transition-all',
+                            isDarkTheme ? 'border-white/10 bg-black/15' : 'border-slate-200 bg-slate-50'
+                          ].join(' ')}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{seller.name}</p>
+                            <button
+                              type="button"
+                              onClick={() => toggleSellerEnabled(seller.id)}
+                              className={[
+                                'rounded-md px-2 py-1 text-[10px] font-semibold uppercase',
+                                isDisabled
+                                  ? 'bg-rose-500/20 text-rose-300'
+                                  : 'bg-emerald-500/20 text-emerald-300'
+                              ].join(' ')}
+                            >
+                              {isDisabled ? 'Desabilitado' : 'Habilitado'}
+                            </button>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between text-xs">
+                            <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>Vendas</span>
+                            <span className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{formatCurrency(seller.salesVolume)}</span>
+                          </div>
                         </div>
-                        <div className="mt-1 flex items-center justify-between text-xs">
-                          <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>Vendas</span>
-                          <span className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{formatCurrency(seller.salesVolume)}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  ) : (
+                    <p className={['rounded-md border px-3 py-2 text-xs', isDarkTheme ? 'border-white/10 bg-slate-900/60 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'].join(' ')}>
+                      Nenhum vendedor real encontrado ainda. Crie usuarios CLIENT na area de clientes para habilitar essa integracao.
+                    </p>
+                  )}
                 </div>
 
                 <div className={['mt-4 rounded-lg border p-3', isDarkTheme ? 'border-white/10 bg-black/10' : 'border-slate-200 bg-white'].join(' ')}>
