@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from 'crypto';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
+import { supabaseAdmin } from '../supabaseClient';
 
 export const customIntegrationEvents = ['sale.created', 'product.updated', 'stock.low'] as const;
 
@@ -26,6 +27,8 @@ type IntegrationStore = {
   companies: Record<string, CompanyIntegrationRecord>;
 };
 
+const storeTableAliases = ['custom_integrations_store', 'customIntegrationsStore'];
+
 const storeFilePath = path.resolve(__dirname, '..', '..', 'data', 'custom-integrations.json');
 const storeDirectoryPath = path.dirname(storeFilePath);
 const defaultStore: IntegrationStore = { companies: {} };
@@ -36,7 +39,87 @@ const ensureStoreDirectory = async () => {
   await mkdir(storeDirectoryPath, { recursive: true });
 };
 
+const cloneDefaultStore = (): IntegrationStore => ({
+  companies: {}
+});
+
+const normalizeStore = (value: unknown): IntegrationStore => {
+  if (!value || typeof value !== 'object') {
+    return cloneDefaultStore();
+  }
+
+  const raw = value as Partial<IntegrationStore>;
+
+  return {
+    companies: raw.companies || {}
+  };
+};
+
+const readStoreFromDatabase = async (): Promise<{ ok: boolean; store: IntegrationStore | null }> => {
+  for (const tableName of storeTableAliases) {
+    const response = await supabaseAdmin
+      .from(tableName)
+      .select('id,data')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (!response.error) {
+      const row = (response.data || {}) as Record<string, unknown>;
+      const store = normalizeStore(row.data);
+
+      return {
+        ok: true,
+        store
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    store: null
+  };
+};
+
+const writeStoreToDatabase = async (store: IntegrationStore): Promise<boolean> => {
+  const now = new Date().toISOString();
+
+  for (const tableName of storeTableAliases) {
+    const payloadCandidates: Array<Record<string, unknown>> = [
+      {
+        id: 1,
+        data: store,
+        updated_at: now
+      },
+      {
+        id: 1,
+        data: store,
+        updatedAt: now
+      }
+    ];
+
+    for (const payload of payloadCandidates) {
+      const response = await supabaseAdmin
+        .from(tableName)
+        .upsert(payload, { onConflict: 'id' })
+        .select('id')
+        .single();
+
+      if (!response.error) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
+
 const readStore = async (): Promise<IntegrationStore> => {
+  const fromDatabase = await readStoreFromDatabase();
+
+  if (fromDatabase.ok && fromDatabase.store) {
+    return fromDatabase.store;
+  }
+
   await ensureStoreDirectory();
 
   try {
@@ -46,11 +129,17 @@ const readStore = async (): Promise<IntegrationStore> => {
       companies: parsed.companies || {}
     };
   } catch (_error) {
-    return defaultStore;
+    return cloneDefaultStore();
   }
 };
 
 const writeStore = async (store: IntegrationStore) => {
+  const persistedInDatabase = await writeStoreToDatabase(store);
+
+  if (persistedInDatabase) {
+    return;
+  }
+
   await ensureStoreDirectory();
   await writeFile(storeFilePath, JSON.stringify(store, null, 2), 'utf8');
 };
