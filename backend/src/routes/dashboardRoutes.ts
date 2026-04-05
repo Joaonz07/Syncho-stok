@@ -955,17 +955,21 @@ const insertWithAliases = async (
   aliasKey: keyof typeof tableAliases,
   payload: Record<string, unknown>
 ) => {
+  let lastError: string | null = null;
+
   for (const tableName of tableAliases[aliasKey]) {
     const response = await supabaseAdmin.from(tableName).insert(payload).select('*').single();
 
     if (!response.error) {
       return response;
     }
+
+    lastError = `${tableName}: ${response.error.message || 'erro desconhecido ao inserir'}`;
   }
 
   return {
     data: null,
-    error: { message: `Nao foi possivel inserir em ${aliasKey}.` }
+    error: { message: lastError || `Nao foi possivel inserir em ${aliasKey}.` }
   };
 };
 
@@ -1156,12 +1160,41 @@ router.post('/products', requireAuth, async (req, res) => {
         code,
         price,
         description,
+        quantity,
+        [companyField]: companyId
+      },
+      {
+        name,
+        code,
+        price,
+        description,
+        quantity,
+        user_id: req.authUser.id,
+        [companyField]: companyId
+      },
+      {
+        name,
+        code,
+        price,
+        description,
+        quantity,
+        userId: req.authUser.id,
         [companyField]: companyId
       },
       {
         name,
         price,
         description,
+        quantity,
+        user_id: req.authUser.id,
+        [companyField]: companyId
+      },
+      {
+        name,
+        price,
+        description,
+        quantity,
+        userId: req.authUser.id,
         [companyField]: companyId
       },
       {
