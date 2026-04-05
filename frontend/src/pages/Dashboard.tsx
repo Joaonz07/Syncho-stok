@@ -3723,6 +3723,23 @@ const Dashboard = () => {
         </AnimatePresence>
       </div>
 
+      <div className="fixed left-4 top-4 z-[60] lg:hidden">
+        <motion.button
+          type="button"
+          whileTap={{ scale: 0.94 }}
+          onClick={handleLogout}
+          className={[
+            'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-md transition-all',
+            isDarkTheme
+              ? 'border-white/10 bg-white/5 text-slate-100 hover:bg-rose-500/10 hover:text-rose-300'
+              : 'border-slate-200 bg-white text-slate-700 hover:bg-rose-50 hover:text-rose-700'
+          ].join(' ')}
+        >
+          <LogOut className="h-4 w-4" />
+          Sair
+        </motion.button>
+      </div>
+
       <div className="flex min-h-screen">
         {/* ─── SIDEBAR ─── */}
         <aside className={[
