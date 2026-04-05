@@ -29,7 +29,15 @@ import {
   ArrowDownRight,
   Lightbulb,
   AlertTriangle,
-  Award
+  Award,
+  Copy,
+  KeyRound,
+  RefreshCw,
+  Webhook,
+  ShieldCheck,
+  Code2,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import {
   LineChart,
@@ -205,6 +213,31 @@ type SupportChatMessage = {
 type Toast = {
   id: number;
   message: string;
+};
+
+type IntegrationEvent = 'sale.created' | 'product.updated' | 'stock.low';
+
+type IntegrationWebhook = {
+  id: string;
+  url: string;
+  events: IntegrationEvent[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type IntegrationEndpoint = {
+  method: 'GET' | 'POST';
+  path: string;
+  description: string;
+};
+
+type IntegrationApiConfig = {
+  companyId: string;
+  apiKey: string;
+  maskedApiKey: string;
+  webhooks: IntegrationWebhook[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 const columns: Array<{ key: LeadStatus; label: string }> = [
@@ -737,6 +770,13 @@ const Dashboard = () => {
   const [editingProductName, setEditingProductName] = useState('');
   const [editingProductPrice, setEditingProductPrice] = useState('');
   const [editingProductDescription, setEditingProductDescription] = useState('');
+  const [integrationCompanyId, setIntegrationCompanyId] = useState('');
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationApiConfig, setIntegrationApiConfig] = useState<IntegrationApiConfig | null>(null);
+  const [integrationEndpoints, setIntegrationEndpoints] = useState<IntegrationEndpoint[]>([]);
+  const [integrationEvents, setIntegrationEvents] = useState<IntegrationEvent[]>([]);
+  const [integrationWebhookUrl, setIntegrationWebhookUrl] = useState('');
+  const [integrationWebhookEvents, setIntegrationWebhookEvents] = useState<IntegrationEvent[]>(['sale.created']);
   const [settingsCompanyId, setSettingsCompanyId] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSubscription, setSettingsSubscription] = useState<SubscriptionInfo | null>(null);
@@ -1838,6 +1878,194 @@ const Dashboard = () => {
     return String(companyId || companyIdFromJwt || getSessionCompanyId() || '').trim();
   };
 
+  const copyToClipboard = async (value: string, successMessage: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast(successMessage);
+    } catch (_error) {
+      setStatus('Nao foi possivel copiar para a area de transferencia.');
+    }
+  };
+
+  const fetchIntegrationConfig = async () => {
+    if (!token) {
+      return;
+    }
+
+    const targetCompanyId = getTargetCompanyId(integrationCompanyId);
+
+    if (!targetCompanyId) {
+      setIntegrationApiConfig(null);
+      setIntegrationEndpoints([]);
+      setIntegrationEvents([]);
+      setStatus('Selecione uma empresa para configurar a integracao API.');
+      return;
+    }
+
+    setIntegrationLoading(true);
+
+    try {
+      const response = await fetch(`/api/dashboard/integrations/custom-api?companyId=${encodeURIComponent(targetCompanyId)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao carregar a integracao customizada.');
+        return;
+      }
+
+      setIntegrationApiConfig(result.api as IntegrationApiConfig);
+      setIntegrationEndpoints((result.endpoints || []) as IntegrationEndpoint[]);
+      setIntegrationEvents((result.events || []) as IntegrationEvent[]);
+    } catch (_error) {
+      setStatus('Erro de rede ao carregar integracoes.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const regenerateIntegrationApiKey = async () => {
+    if (!token) {
+      return;
+    }
+
+    const targetCompanyId = getTargetCompanyId(integrationCompanyId);
+
+    if (!targetCompanyId) {
+      setStatus('Selecione uma empresa para regenerar a API key.');
+      return;
+    }
+
+    setIntegrationLoading(true);
+
+    try {
+      const response = await fetch('/api/dashboard/integrations/custom-api/regenerate', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ companyId: targetCompanyId })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao regenerar API key.');
+        return;
+      }
+
+      setIntegrationApiConfig(result.api as IntegrationApiConfig);
+      showToast('API key regenerada');
+    } catch (_error) {
+      setStatus('Erro de rede ao regenerar API key.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const addIntegrationWebhook = () => {
+    const url = integrationWebhookUrl.trim();
+
+    if (!/^https?:\/\//i.test(url)) {
+      setStatus('Informe uma URL de webhook valida com http:// ou https://.');
+      return;
+    }
+
+    if (!integrationWebhookEvents.length) {
+      setStatus('Selecione pelo menos um evento para o webhook.');
+      return;
+    }
+
+    setIntegrationApiConfig((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        webhooks: [
+          ...current.webhooks,
+          {
+            id: `local-${Date.now()}`,
+            url,
+            events: integrationWebhookEvents,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        ]
+      };
+    });
+
+    setIntegrationWebhookUrl('');
+    setIntegrationWebhookEvents(['sale.created']);
+  };
+
+  const removeIntegrationWebhook = (webhookId: string) => {
+    setIntegrationApiConfig((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        webhooks: current.webhooks.filter((webhook) => webhook.id !== webhookId)
+      };
+    });
+  };
+
+  const toggleIntegrationWebhookEvent = (event: IntegrationEvent) => {
+    setIntegrationWebhookEvents((current) =>
+      current.includes(event) ? current.filter((item) => item !== event) : [...current, event]
+    );
+  };
+
+  const saveIntegrationWebhooks = async () => {
+    if (!token || !integrationApiConfig) {
+      return;
+    }
+
+    const targetCompanyId = getTargetCompanyId(integrationCompanyId);
+
+    if (!targetCompanyId) {
+      setStatus('Selecione uma empresa para salvar os webhooks.');
+      return;
+    }
+
+    setIntegrationLoading(true);
+
+    try {
+      const response = await fetch('/api/dashboard/integrations/custom-api/webhooks', {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          companyId: targetCompanyId,
+          webhooks: integrationApiConfig.webhooks.map((webhook) => ({
+            id: webhook.id,
+            url: webhook.url,
+            events: webhook.events
+          }))
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao salvar webhooks.');
+        return;
+      }
+
+      setIntegrationApiConfig(result.api as IntegrationApiConfig);
+      showToast('Webhooks salvos');
+    } catch (_error) {
+      setStatus('Erro de rede ao salvar webhooks.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
   const getSupportChatCompanyId = (requestId: string | null = selectedSupportRequestId) => {
     const normalizedRequestId = String(requestId || '').trim();
     const selectedRequest = normalizedRequestId
@@ -1865,6 +2093,20 @@ const Dashboard = () => {
 
     setProductCompanyId(linkedCompanyId);
   }, [role, companyId, companyIdFromJwt, productCompanyId]);
+
+  useEffect(() => {
+    if (role === 'ADMIN') {
+      return;
+    }
+
+    const linkedCompanyId = String(companyId || companyIdFromJwt || '').trim();
+
+    if (!linkedCompanyId || linkedCompanyId === integrationCompanyId) {
+      return;
+    }
+
+    setIntegrationCompanyId(linkedCompanyId);
+  }, [role, companyId, companyIdFromJwt, integrationCompanyId]);
 
   const fetchProducts = async () => {
     if (!token) {
@@ -2451,6 +2693,12 @@ const Dashboard = () => {
       void fetchSettings();
     }
   }, [activeView, token, settingsCompanyId]);
+
+  useEffect(() => {
+    if (activeView === 'integrations') {
+      void fetchIntegrationConfig();
+    }
+  }, [activeView, token, integrationCompanyId]);
 
   useEffect(() => {
     if (activeView === 'chat') {
@@ -3669,6 +3917,57 @@ const Dashboard = () => {
     setActiveView(item.path);
     setActiveMenuName(item.name);
   };
+
+  const integrationApiBaseUrl = `${getApiBaseUrl() || (typeof window !== 'undefined' ? window.location.origin : '')}/api/external`;
+  const integrationTokenPreview = integrationApiConfig?.apiKey || 'SUA_API_KEY';
+
+  const integrationExamples = integrationEndpoints.map((endpoint) => {
+    const url = `${integrationApiBaseUrl}${endpoint.path.replace('/api/external', '')}`;
+
+    if (endpoint.path.endsWith('/products')) {
+      return {
+        ...endpoint,
+        example: `curl -X GET "${url}" \\
+  -H "Authorization: Bearer ${integrationTokenPreview}"`
+      };
+    }
+
+    if (endpoint.path.endsWith('/dashboard')) {
+      return {
+        ...endpoint,
+        example: `curl -X GET "${url}" \\
+  -H "Authorization: Bearer ${integrationTokenPreview}"`
+      };
+    }
+
+    if (endpoint.path.endsWith('/sales')) {
+      return {
+        ...endpoint,
+        example: `curl -X POST "${url}" \\
+  -H "Authorization: Bearer ${integrationTokenPreview}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "items": [
+      { "productId": "ID_DO_PRODUTO", "quantity": 2 }
+    ]
+  }'`
+      };
+    }
+
+    return {
+      ...endpoint,
+      example: `curl -X POST "${url}" \\
+  -H "Authorization: Bearer ${integrationTokenPreview}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "Lead via API",
+    "status": "NOVO_CONTATO",
+    "priority": "MEDIA",
+    "value": 1500,
+    "notes": "Criado por integracao externa"
+  }'`
+    };
+  });
 
   return (
     <main className={[
@@ -5192,54 +5491,269 @@ const Dashboard = () => {
               className="grid gap-6"
             >
               <div className={[
-                'rounded-2xl border p-5 shadow-xl',
-                isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(34,211,238,0.12)]' : 'border-slate-200 bg-white'
+                'rounded-3xl border p-6 shadow-xl',
+                isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_28px_rgba(34,211,238,0.12)]' : 'border-slate-200 bg-white'
               ].join(' ')}>
-                <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Integracoes</h1>
-                <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                  Atendimento direto no WhatsApp Web dentro desta tela.
-                </p>
-              </div>
-
-              <div className={[
-                'rounded-2xl border p-5',
-                isDarkTheme ? 'border-blue-500/20 bg-[#0d1117] shadow-[0_0_18px_rgba(59,130,246,0.12)]' : 'border-slate-200 bg-white'
-              ].join(' ')}>
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>WhatsApp Web</h3>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                      O WhatsApp bloqueia iframe (CSP), então o acesso funciona por abertura oficial do WhatsApp Web.
+                    <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Integracoes API</h1>
+                    <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Conecte ERPs, automacoes e apps externos com Bearer token e webhooks configuraveis por empresa.
                     </p>
                   </div>
-                </div>
 
-                <div className={[
-                  'rounded-xl border p-5',
-                  isDarkTheme ? 'border-white/10 bg-black/25' : 'border-slate-200 bg-slate-50'
-                ].join(' ')}>
-                  <p className={['text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>
-                    Para funcionar sem bloqueio, clique em abrir WhatsApp Web. O login por QR Code continua normal.
-                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {role === 'ADMIN' ? (
+                      <select
+                        className={['min-w-[220px] rounded-xl border px-3 py-2 text-sm outline-none transition-all', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400'].join(' ')}
+                        value={integrationCompanyId}
+                        onChange={(event) => setIntegrationCompanyId(event.target.value)}
+                      >
+                        <option value="">Selecione a empresa</option>
+                        {companyOptions.map((option) => (
+                          <option key={option.id} value={option.id}>{option.name}</option>
+                        ))}
+                      </select>
+                    ) : null}
 
-                  <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => window.open('https://web.whatsapp.com/', '_blank', 'noopener,noreferrer')}
-                      className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500"
+                      onClick={() => void fetchIntegrationConfig()}
+                      disabled={integrationLoading}
+                      className={['rounded-xl px-4 py-2 text-sm font-semibold transition-all disabled:opacity-70', isDarkTheme ? 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10' : 'border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'].join(' ')}
                     >
-                      Abrir WhatsApp Web
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => window.open('https://wa.me/', '_blank', 'noopener,noreferrer')}
-                      className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'}
-                    >
-                      Abrir wa.me
+                      {integrationLoading ? 'Carregando...' : 'Atualizar'}
                     </button>
                   </div>
                 </div>
               </div>
+
+              {integrationApiConfig ? (
+                <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                  <div className="grid gap-6">
+                    <div className={[
+                      'rounded-3xl border p-6',
+                      isDarkTheme ? 'border-emerald-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    ].join(' ')}>
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <div className="rounded-2xl bg-emerald-500/15 p-3 text-emerald-300">
+                            <KeyRound className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>API Key da empresa</h3>
+                            <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>
+                              Use esta chave no header Authorization como Bearer token para acessar os endpoints externos.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void copyToClipboard(integrationApiConfig.apiKey, 'API key copiada')}
+                            className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500"
+                          >
+                            <span className="inline-flex items-center gap-2"><Copy className="h-4 w-4" />Copiar</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void regenerateIntegrationApiKey()}
+                            disabled={integrationLoading}
+                            className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60'}
+                          >
+                            <span className="inline-flex items-center gap-2"><RefreshCw className="h-4 w-4" />Regenerar</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={['mt-5 rounded-2xl border px-4 py-4', isDarkTheme ? 'border-white/10 bg-black/30' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                        <p className={['text-xs uppercase tracking-[0.25em]', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Token mascarado</p>
+                        <p className={['mt-2 break-all font-mono text-sm', isDarkTheme ? 'text-emerald-300' : 'text-emerald-700'].join(' ')}>
+                          {integrationApiConfig.maskedApiKey}
+                        </p>
+                        <p className={['mt-3 text-xs', themedSubtextClass].join(' ')}>
+                          Ultima atualizacao: {formatDateTime(integrationApiConfig.updatedAt)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className={[
+                      'rounded-3xl border p-6',
+                      isDarkTheme ? 'border-blue-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    ].join(' ')}>
+                      <div className="mb-5 flex items-start gap-3">
+                        <div className="rounded-2xl bg-blue-500/15 p-3 text-blue-300">
+                          <Code2 className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Endpoints disponiveis</h3>
+                          <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>
+                            Base URL: <span className="font-mono">{integrationApiBaseUrl}</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4">
+                        {integrationExamples.map((endpoint) => (
+                          <div key={`${endpoint.method}-${endpoint.path}`} className={['rounded-2xl border p-4', isDarkTheme ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className={['rounded-full px-2.5 py-1 text-xs font-black', endpoint.method === 'GET' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-blue-500/15 text-blue-300'].join(' ')}>{endpoint.method}</span>
+                                  <span className={['font-mono text-sm', isDarkTheme ? 'text-slate-200' : 'text-slate-700'].join(' ')}>{endpoint.path}</span>
+                                </div>
+                                <p className={['mt-2 text-sm', themedSubtextClass].join(' ')}>{endpoint.description}</p>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => void copyToClipboard(endpoint.example, `Exemplo de ${endpoint.path} copiado`)}
+                                className={isDarkTheme ? 'rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white'}
+                              >
+                                <span className="inline-flex items-center gap-2"><Copy className="h-3.5 w-3.5" />Copiar exemplo</span>
+                              </button>
+                            </div>
+
+                            <pre className={['mt-4 overflow-x-auto rounded-2xl p-4 text-xs leading-6', isDarkTheme ? 'bg-[#020617] text-cyan-200' : 'bg-slate-950 text-slate-100'].join(' ')}>
+                              <code>{endpoint.example}</code>
+                            </pre>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-6">
+                    <div className={[
+                      'rounded-3xl border p-6',
+                      isDarkTheme ? 'border-fuchsia-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    ].join(' ')}>
+                      <div className="mb-5 flex items-start gap-3">
+                        <div className="rounded-2xl bg-fuchsia-500/15 p-3 text-fuchsia-300">
+                          <Webhook className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Webhooks</h3>
+                          <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>
+                            Receba eventos de venda, produto e estoque baixo no seu endpoint.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <input
+                          value={integrationWebhookUrl}
+                          onChange={(event) => setIntegrationWebhookUrl(event.target.value)}
+                          placeholder="https://seu-sistema.com/webhooks/syncho"
+                          className={themedInputClass}
+                        />
+
+                        <div className="flex flex-wrap gap-2">
+                          {integrationEvents.map((event) => {
+                            const isSelected = integrationWebhookEvents.includes(event);
+
+                            return (
+                              <button
+                                key={event}
+                                type="button"
+                                onClick={() => toggleIntegrationWebhookEvent(event)}
+                                className={[
+                                  'rounded-full px-3 py-1.5 text-xs font-semibold transition-all',
+                                  isSelected
+                                    ? 'bg-cyan-600 text-white'
+                                    : isDarkTheme
+                                      ? 'border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                                      : 'border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                                ].join(' ')}
+                              >
+                                {event}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={addIntegrationWebhook}
+                          className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-fuchsia-500"
+                        >
+                          <span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" />Adicionar webhook</span>
+                        </button>
+                      </div>
+
+                      <div className="mt-5 space-y-3">
+                        {integrationApiConfig.webhooks.length ? (
+                          integrationApiConfig.webhooks.map((webhook) => (
+                            <div key={webhook.id} className={['rounded-2xl border p-4', isDarkTheme ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className={['break-all text-sm font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{webhook.url}</p>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {webhook.events.map((event) => (
+                                      <span key={event} className="rounded-full bg-cyan-500/15 px-2 py-1 text-[11px] font-semibold text-cyan-300">{event}</span>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => removeIntegrationWebhook(webhook.id)}
+                                  className={isDarkTheme ? 'rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/10' : 'rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50'}
+                                >
+                                  <span className="inline-flex items-center gap-2"><Trash2 className="h-3.5 w-3.5" />Remover</span>
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className={['text-sm', themedSubtextClass].join(' ')}>Nenhum webhook configurado ainda.</p>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void saveIntegrationWebhooks()}
+                        disabled={integrationLoading}
+                        className="mt-5 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500 disabled:opacity-60"
+                      >
+                        Salvar webhooks
+                      </button>
+                    </div>
+
+                    <div className={[
+                      'rounded-3xl border p-6',
+                      isDarkTheme ? 'border-amber-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'
+                    ].join(' ')}>
+                      <div className="mb-4 flex items-start gap-3">
+                        <div className="rounded-2xl bg-amber-500/15 p-3 text-amber-300">
+                          <ShieldCheck className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Seguranca</h3>
+                          <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>
+                            A API valida Bearer token por empresa e aplica rate limit basico para reduzir abuso.
+                          </p>
+                        </div>
+                      </div>
+
+                      <ul className={['space-y-2 text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>
+                        <li>Bearer token exclusivo por empresa.</li>
+                        <li>Regeneracao imediata invalida a chave anterior.</li>
+                        <li>Rate limit padrao de 120 requisicoes por minuto por API key.</li>
+                        <li>Webhooks enviados com assinatura HMAC em X-Syncho-Signature.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className={[
+                  'rounded-3xl border p-10 text-center',
+                  isDarkTheme ? 'border-white/10 bg-[#0d1117] text-slate-400' : 'border-slate-200 bg-white text-slate-500'
+                ].join(' ')}>
+                  {integrationLoading ? 'Carregando configuracao da integracao...' : 'Selecione uma empresa e clique em Atualizar para configurar a API customizada.'}
+                </div>
+              )}
             </motion.div>
           ) : null}
 

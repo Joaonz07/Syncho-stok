@@ -7,6 +7,7 @@ import authRoutes from './routes/authRoutes';
 import adminRoutes from './routes/adminRoutes';
 import { getAllowedOrigins, shouldServeFrontend } from './config/runtime';
 import dashboardRoutes from './routes/dashboardRoutes';
+import externalIntegrationRoutes from './routes/externalIntegrationRoutes';
 
 const app = express();
 const publicPath = path.resolve(__dirname, '..', 'public');
@@ -46,6 +47,7 @@ if (canServeFrontend) {
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/external', externalIntegrationRoutes);
 
 app.get('/health', (_req, res) => {
 	res.json({ status: 'OK' });

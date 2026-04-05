@@ -16,6 +16,14 @@ import { sendSupportRequestNotification } from '../services/emailService';
 import { emitSupportMessage } from '../socket/gateway';
 import { emitIntegrationMessage } from '../socket/gateway';
 import { sendMessageByProvider } from '../services/externalMessagingService';
+import {
+  customIntegrationEvents,
+  dispatchCompanyWebhookEvent,
+  getCompanyIntegrationProfile,
+  regenerateCompanyIntegrationApiKey,
+  replaceCompanyIntegrationWebhooks,
+  type CustomIntegrationEvent
+} from '../services/customIntegrationService';
 
 const router = Router();
 
@@ -230,6 +238,7 @@ const mapSupportChatMessages = async (
 };
 
 const integrationProviders = ['WHATSAPP'] as const;
+const lowStockThreshold = 5;
 const integrationProviderFields = ['provider', 'channel'];
 const integrationConversationAliases = ['conversation_id', 'conversationId'];
 const integrationUserAliases = ['user_id', 'userId'];
@@ -1353,6 +1362,11 @@ router.patch('/products/:id', requireAuth, async (req, res) => {
   const response = await updateProductWithAliases(productId, companyId, payload);
 
   if (!response.error) {
+    void dispatchCompanyWebhookEvent(companyId, 'product.updated', {
+      productId,
+      product: response.data
+    });
+
     return res.status(200).json({ message: 'Produto atualizado com sucesso.', product: response.data });
   }
 
@@ -1490,6 +1504,14 @@ router.patch('/inventory/:productId', requireAuth, async (req, res) => {
     reason: `Ajuste manual de estoque (${action})`
   });
 
+  if (nextQuantity <= lowStockThreshold) {
+    void dispatchCompanyWebhookEvent(companyId, 'stock.low', {
+      productId,
+      quantity: nextQuantity,
+      threshold: lowStockThreshold
+    });
+  }
+
   return res.status(200).json({
     message: 'Estoque atualizado com sucesso.',
     inventory: {
@@ -1552,6 +1574,11 @@ router.post('/sales', requireAuth, async (req, res) => {
       const response = await insertWithAliases('sales', payload);
 
       if (!response.error) {
+        void dispatchCompanyWebhookEvent(companyId, 'sale.created', {
+          sale: response.data,
+          total
+        });
+
         return res.status(201).json({ message: 'Venda registrada com sucesso.', sale: response.data });
       }
 
@@ -1712,7 +1739,28 @@ router.post('/sales/checkout', requireAuth, async (req, res) => {
       quantity: item.quantity,
       reason: `Venda ${saleId}`
     });
+
+    if (item.stockAfter <= lowStockThreshold) {
+      void dispatchCompanyWebhookEvent(companyId, 'stock.low', {
+        productId: item.productId,
+        name: item.name,
+        quantity: item.stockAfter,
+        threshold: lowStockThreshold
+      });
+    }
   }
+
+  void dispatchCompanyWebhookEvent(companyId, 'sale.created', {
+    sale: saleRecord,
+    total,
+    items: normalizedItems.map((item) => ({
+      productId: item.productId,
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      stockAfter: item.stockAfter
+    }))
+  });
 
   return res.status(201).json({
     message: 'Venda finalizada com sucesso e estoque atualizado.',
@@ -2223,6 +2271,91 @@ router.patch('/support-requests/:id', requireAuth, async (req, res) => {
   return res.status(200).json({
     message: 'Solicitacao de suporte atualizada com sucesso.',
     request: updated.data
+  });
+});
+
+router.get('/integrations/custom-api', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para consultar a API customizada.' });
+  }
+
+  const profile = await getCompanyIntegrationProfile(companyId);
+
+  return res.status(200).json({
+    companyId,
+    api: profile,
+    events: customIntegrationEvents,
+    endpoints: [
+      { method: 'GET', path: '/api/external/products', description: 'Lista os produtos da empresa autenticada.' },
+      { method: 'POST', path: '/api/external/sales', description: 'Registra uma venda com Bearer token.' },
+      { method: 'GET', path: '/api/external/dashboard', description: 'Retorna resumo da operacao.' },
+      { method: 'POST', path: '/api/external/leads', description: 'Cria um lead no CRM.' }
+    ]
+  });
+});
+
+router.post('/integrations/custom-api/regenerate', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para regenerar a API key.' });
+  }
+
+  const profile = await regenerateCompanyIntegrationApiKey(companyId);
+
+  return res.status(200).json({
+    message: 'API key regenerada com sucesso.',
+    api: profile
+  });
+});
+
+router.put('/integrations/custom-api/webhooks', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+  const rawWebhooks = Array.isArray(req.body?.webhooks) ? req.body.webhooks : [];
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para salvar webhooks.' });
+  }
+
+  const normalizedWebhooks = rawWebhooks.map((webhook: Record<string, unknown>) => ({
+    id: String(webhook?.id || '').trim() || undefined,
+    url: String(webhook?.url || '').trim(),
+    events: Array.isArray(webhook?.events)
+      ? webhook.events.filter((event: unknown): event is CustomIntegrationEvent =>
+          customIntegrationEvents.includes(String(event || '').trim() as CustomIntegrationEvent)
+        )
+      : []
+  }));
+
+  for (const webhook of normalizedWebhooks) {
+    if (!/^https?:\/\//i.test(webhook.url)) {
+      return res.status(400).json({ message: `Webhook invalido: ${webhook.url || 'URL vazia'}.` });
+    }
+
+    if (!webhook.events.length) {
+      return res.status(400).json({ message: `Selecione ao menos um evento para ${webhook.url}.` });
+    }
+  }
+
+  const profile = await replaceCompanyIntegrationWebhooks(companyId, normalizedWebhooks);
+
+  return res.status(200).json({
+    message: 'Webhooks salvos com sucesso.',
+    api: profile
   });
 });
 

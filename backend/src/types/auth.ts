@@ -6,3 +6,8 @@ export interface AuthUser {
   role: UserRole;
   companyId: string | null;
 }
+
+export interface IntegrationApiAuth {
+  companyId: string;
+  apiKey: string;
+}
