@@ -13,7 +13,18 @@ const publicPath = path.resolve(__dirname, '..', 'public');
 const allowedOrigins = getAllowedOrigins();
 const canServeFrontend = shouldServeFrontend() && existsSync(path.join(publicPath, 'index.html'));
 
-app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(helmet({ 
+	crossOriginResourcePolicy: false,
+	contentSecurityPolicy: {
+		directives: {
+			defaultSrc: ["'self'"],
+			connect: ["'self'", 'https:', 'wss:'],
+			scriptSrc: ["'self'", "'unsafe-inline'"],
+			styleSrc: ["'self'", "'unsafe-inline'"],
+			imgSrc: ["'self'", 'data:', 'https:'],
+		}
+	}
+}));
 app.use(
 	cors({
 		origin: (origin, callback) => {
