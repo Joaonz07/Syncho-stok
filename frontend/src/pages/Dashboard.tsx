@@ -351,6 +351,224 @@ const inferLeadSource = (lead: Lead) => {
   return acquisitionSources[hashString(`${lead.id}-${lead.name}`) % acquisitionSources.length];
 };
 
+type ProductComboboxProps = {
+  products: Product[];
+  value: string;
+  onChange: (productId: string) => void;
+  isDarkTheme: boolean;
+};
+
+const ProductCombobox = ({ products, value, onChange, isDarkTheme }: ProductComboboxProps) => {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selected = useMemo(() => products.find((p) => p.id === value) || null, [products, value]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(
+      (p) =>
+        String(p.name || '').toLowerCase().includes(q) ||
+        String(p.code || '').toLowerCase().includes(q)
+    );
+  }, [products, search]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const openDropdown = () => {
+    setOpen(true);
+    setFocusedIndex(-1);
+  };
+
+  const selectProduct = (productId: string) => {
+    onChange(productId);
+    setOpen(false);
+    setSearch('');
+    setFocusedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setOpen(false);
+      setSearch('');
+      return;
+    }
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') openDropdown();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setFocusedIndex((i) => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setFocusedIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter' && focusedIndex >= 0 && filtered[focusedIndex]) {
+      e.preventDefault();
+      selectProduct(filtered[focusedIndex].id);
+    }
+  };
+
+  const panelClass = isDarkTheme
+    ? 'border-white/10 bg-gray-950/98 shadow-[0_16px_48px_rgba(0,0,0,0.55)]'
+    : 'border-slate-200 bg-white shadow-xl';
+
+  const triggerClass = isDarkTheme
+    ? 'border border-white/10 bg-white/5 text-slate-100'
+    : 'border border-slate-200 bg-slate-50 text-slate-800';
+
+  const triggerOpenClass = isDarkTheme
+    ? 'border-blue-500 ring-2 ring-blue-500/20'
+    : 'border-blue-400 ring-2 ring-blue-400/20';
+
+  return (
+    <div ref={containerRef} className="relative" onKeyDown={handleKeyDown}>
+      {/* Trigger button */}
+      <button
+        type="button"
+        onClick={() => (open ? (setOpen(false), setSearch('')) : openDropdown())}
+        className={[
+          'flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm transition-all outline-none',
+          triggerClass,
+          open ? triggerOpenClass : ''
+        ].join(' ')}
+      >
+        {selected ? (
+          <span className="flex items-center gap-2 min-w-0 truncate">
+            <span className={['truncate font-medium', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>
+              {selected.name}
+            </span>
+            <span className={['shrink-0 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
+              {formatCurrency(Number(selected.price || 0))}
+            </span>
+          </span>
+        ) : (
+          <span className={isDarkTheme ? 'text-slate-500' : 'text-slate-400'}>Selecione o produto</span>
+        )}
+        <ChevronRight
+          className={[
+            'h-4 w-4 shrink-0 transition-transform duration-200',
+            isDarkTheme ? 'text-slate-500' : 'text-slate-400',
+            open ? 'rotate-90' : ''
+          ].join(' ')}
+        />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ duration: 0.16, ease: 'easeOut' }}
+            className={[
+              'absolute left-0 right-0 top-full z-[200] mt-1.5 overflow-hidden rounded-xl border backdrop-blur-md',
+              panelClass
+            ].join(' ')}
+          >
+            {/* Search input */}
+            <div className={['px-3 py-2.5 border-b', isDarkTheme ? 'border-white/8' : 'border-slate-100'].join(' ')}>
+              <input
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+                type="text"
+                className={[
+                  'w-full rounded-lg px-3 py-1.5 text-sm outline-none transition-all',
+                  isDarkTheme
+                    ? 'border border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
+                    : 'border border-slate-200 bg-slate-50 text-slate-800 placeholder-slate-400 focus:border-blue-400'
+                ].join(' ')}
+                placeholder="Buscar produto..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setFocusedIndex(-1);
+                }}
+              />
+            </div>
+
+            {/* Product list */}
+            <div
+              className="max-h-56 overflow-y-auto py-1"
+              style={{ scrollbarWidth: 'thin', scrollbarColor: isDarkTheme ? 'rgba(100,116,139,0.4) transparent' : 'rgba(148,163,184,0.4) transparent' }}
+            >
+              {filtered.length ? (
+                filtered.map((product, idx) => {
+                  const qty = Number(product.quantity || 0);
+                  const isLowStock = qty > 0 && qty <= 3;
+                  const isOutOfStock = qty === 0;
+                  const isFocused = focusedIndex === idx;
+                  const isSelected = value === product.id;
+
+                  return (
+                    <motion.button
+                      key={product.id}
+                      type="button"
+                      whileHover={{ x: 3 }}
+                      transition={{ duration: 0.12 }}
+                      onClick={() => selectProduct(product.id)}
+                      className={[
+                        'flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors',
+                        isFocused || isSelected
+                          ? isDarkTheme ? 'bg-blue-500/15' : 'bg-blue-50'
+                          : isDarkTheme ? 'hover:bg-white/6' : 'hover:bg-slate-50'
+                      ].join(' ')}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className={['truncate text-sm font-medium', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>
+                          {product.name}
+                        </p>
+                        {product.code ? (
+                          <p className={['text-[11px]', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
+                            {product.code}
+                          </p>
+                        ) : null}
+                      </div>
+                      <span className={['shrink-0 text-sm font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>
+                        {formatCurrency(Number(product.price || 0))}
+                      </span>
+                      <span
+                        className={[
+                          'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                          isOutOfStock
+                            ? 'bg-slate-500/20 text-slate-400'
+                            : isLowStock
+                              ? 'bg-rose-500/15 text-rose-400'
+                              : isDarkTheme ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
+                        ].join(' ')}
+                      >
+                        Est. {qty}
+                      </span>
+                    </motion.button>
+                  );
+                })
+              ) : (
+                <div className="px-4 py-6 text-center">
+                  <p className={['text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>
+                    Nenhum produto encontrado
+                  </p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 const Dashboard = () => {
   const { companyId, role, isAuthenticated, loading: authLoading, signOut } = useAuth();
   const token = getAccessToken();
@@ -4298,23 +4516,12 @@ const Dashboard = () => {
 
                   {saleLines.map((line) => (
                     <div key={line.id} className="grid gap-2 md:grid-cols-[1fr_180px_auto]">
-                      <select
-                        className={[
-                          'rounded-xl px-3 py-2 text-sm outline-none transition-all focus:border-blue-400',
-                          isDarkTheme
-                            ? 'border border-white/10 bg-white/5 text-slate-100 focus:ring-2 focus:ring-cyan-500/40'
-                            : 'border border-slate-200 bg-slate-50'
-                        ].join(' ')}
+                      <ProductCombobox
+                        products={products}
                         value={line.productId}
-                        onChange={(event) => updateSaleLine(line.id, { productId: event.target.value })}
-                      >
-                        <option className={isDarkTheme ? 'bg-slate-900 text-slate-100' : ''} value="">Selecione o produto</option>
-                        {products.map((product) => (
-                          <option className={isDarkTheme ? 'bg-slate-900 text-slate-100' : ''} key={product.id} value={product.id}>
-                            {product.name} - Estoque: {Number(product.quantity || 0)} - {formatCurrency(Number(product.price || 0))}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(productId) => updateSaleLine(line.id, { productId })}
+                        isDarkTheme={isDarkTheme}
+                      />
 
                       <input
                         className={[
