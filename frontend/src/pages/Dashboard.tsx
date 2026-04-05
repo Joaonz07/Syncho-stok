@@ -5,7 +5,7 @@ import { Navigate } from 'react-router-dom';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch as fetch, getApiBaseUrl } from '../lib/api';
-import { getAccessToken } from '../lib/session';
+import { getAccessToken, getCompanyId as getSessionCompanyId } from '../lib/session';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -760,7 +760,6 @@ const Dashboard = () => {
   const [supportAdminOnline, setSupportAdminOnline] = useState(false);
   const [supportTypingText, setSupportTypingText] = useState('');
   const [supportUnreadCount, setSupportUnreadCount] = useState(0);
-  const [whatsAppWebFrameKey, setWhatsAppWebFrameKey] = useState(0);
   const [adminSection, setAdminSection] = useState<'overview' | 'companies' | 'users' | 'plans' | 'support'>('overview');
   const [planCatalog, setPlanCatalog] = useState<AdminPlanConfig[]>(() => {
     if (typeof window === 'undefined') {
@@ -1833,7 +1832,7 @@ const Dashboard = () => {
       return selectedForAdmin.trim() || '';
     }
 
-    return String(companyId || companyIdFromJwt || '').trim();
+    return String(companyId || companyIdFromJwt || getSessionCompanyId() || '').trim();
   };
 
   useEffect(() => {
@@ -1873,6 +1872,11 @@ const Dashboard = () => {
         }
       );
       const result = await response.json();
+
+      if (response.status === 401) {
+        setStatus('Sessao expirada. Faca login novamente para continuar.');
+        return;
+      }
 
       if (!response.ok) {
         setStatus(result.message || 'Falha ao carregar produtos.');
@@ -2919,6 +2923,11 @@ const Dashboard = () => {
         })
       });
       const result = await response.json();
+
+      if (response.status === 401) {
+        setStatus('Sessao expirada. Faca login novamente para criar produto.');
+        return;
+      }
 
       if (!response.ok) {
         setStatus(result.message || 'Falha ao criar produto.');
@@ -5049,29 +5058,35 @@ const Dashboard = () => {
                   <div>
                     <h3 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>WhatsApp Web</h3>
                     <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                      Se a sessão estiver expirada, escaneie o QR Code diretamente no painel abaixo.
+                      O WhatsApp bloqueia iframe (CSP), então o acesso funciona por abertura oficial do WhatsApp Web.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setWhatsAppWebFrameKey((current) => current + 1)}
-                    className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'}
-                  >
-                    Recarregar painel
-                  </button>
                 </div>
 
                 <div className={[
-                  'overflow-hidden rounded-xl border',
+                  'rounded-xl border p-5',
                   isDarkTheme ? 'border-white/10 bg-black/25' : 'border-slate-200 bg-slate-50'
                 ].join(' ')}>
-                  <iframe
-                    key={whatsAppWebFrameKey}
-                    title="WhatsApp Web"
-                    src="https://web.whatsapp.com/"
-                    className="h-[72vh] min-h-[640px] w-full"
-                    referrerPolicy="no-referrer"
-                  />
+                  <p className={['text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>
+                    Para funcionar sem bloqueio, clique em abrir WhatsApp Web. O login por QR Code continua normal.
+                  </p>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => window.open('https://web.whatsapp.com/', '_blank', 'noopener,noreferrer')}
+                      className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500"
+                    >
+                      Abrir WhatsApp Web
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.open('https://wa.me/', '_blank', 'noopener,noreferrer')}
+                      className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'}
+                    >
+                      Abrir wa.me
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>
