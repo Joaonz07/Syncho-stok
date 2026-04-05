@@ -156,7 +156,14 @@ type SalesAnalysis = {
   }>;
 };
 
-type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat' | 'analytics';
+type AdminPlanConfig = {
+  id: string;
+  name: string;
+  price: number;
+  features: string[];
+};
+
+type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat' | 'analytics' | 'admin';
 
 type SidebarGroup = 'Comercial' | 'Operacao' | 'Sistema';
 
@@ -606,6 +613,27 @@ const ProductCombobox = ({ products, value, onChange, isDarkTheme }: ProductComb
   );
 };
 
+const DEFAULT_ADMIN_PLANS: AdminPlanConfig[] = [
+  {
+    id: 'BASIC',
+    name: 'BASIC',
+    price: 199,
+    features: ['CRM essencial', 'Funil de vendas', 'Relatorios basicos']
+  },
+  {
+    id: 'PRO',
+    name: 'PRO',
+    price: 399,
+    features: ['Tudo do BASIC', 'Chat e suporte', 'Automacoes comerciais']
+  },
+  {
+    id: 'PREMIUM',
+    name: 'PREMIUM',
+    price: 799,
+    features: ['Tudo do PRO', 'Analises avancadas', 'Suporte prioritario']
+  }
+];
+
 const Dashboard = () => {
   const { companyId, role, isAuthenticated, loading: authLoading, signOut } = useAuth();
   const token = getAccessToken();
@@ -701,6 +729,32 @@ const Dashboard = () => {
   const [supportAdminOnline, setSupportAdminOnline] = useState(false);
   const [supportTypingText, setSupportTypingText] = useState('');
   const [supportUnreadCount, setSupportUnreadCount] = useState(0);
+  const [adminSection, setAdminSection] = useState<'overview' | 'companies' | 'users' | 'plans' | 'support'>('overview');
+  const [planCatalog, setPlanCatalog] = useState<AdminPlanConfig[]>(() => {
+    if (typeof window === 'undefined') {
+      return DEFAULT_ADMIN_PLANS;
+    }
+
+    try {
+      const raw = window.localStorage.getItem('syncho-admin-plan-catalog');
+      if (!raw) {
+        return DEFAULT_ADMIN_PLANS;
+      }
+
+      const parsed = JSON.parse(raw) as AdminPlanConfig[];
+      if (!Array.isArray(parsed) || !parsed.length) {
+        return DEFAULT_ADMIN_PLANS;
+      }
+
+      return parsed;
+    } catch (_error) {
+      return DEFAULT_ADMIN_PLANS;
+    }
+  });
+  const [planEditorId, setPlanEditorId] = useState<string | null>(null);
+  const [planEditorName, setPlanEditorName] = useState('');
+  const [planEditorPrice, setPlanEditorPrice] = useState('');
+  const [planEditorFeatures, setPlanEditorFeatures] = useState('');
   const supportSocketRef = useRef<Socket | null>(null);
   const supportTypingTimeoutRef = useRef<number | null>(null);
 
@@ -1294,6 +1348,120 @@ const Dashboard = () => {
     return insights.slice(0, 4);
   }, [growthPercent, salesAnalysis, sellerPerformanceData, products]);
 
+  const adminPlanPriceMap = useMemo(() => {
+    return planCatalog.reduce<Record<string, number>>((acc, plan) => {
+      acc[String(plan.id || '').toUpperCase()] = Number(plan.price || 0);
+      return acc;
+    }, {});
+  }, [planCatalog]);
+
+  const adminPlanDistributionData = useMemo(() => {
+    const counts: Record<CompanyPlan, number> = { BASIC: 0, PRO: 0, PREMIUM: 0 };
+
+    for (const company of companies) {
+      const plan = ((company.plan || 'BASIC') as CompanyPlan);
+      counts[plan] += 1;
+    }
+
+    const normalized = [
+      { name: 'BASIC', value: counts.BASIC || 0 },
+      { name: 'PRO', value: counts.PRO || 0 },
+      { name: 'PREMIUM', value: counts.PREMIUM || 0 }
+    ];
+
+    if (normalized.every((item) => item.value === 0)) {
+      return [
+        { name: 'BASIC', value: 6 },
+        { name: 'PRO', value: 4 },
+        { name: 'PREMIUM', value: 2 }
+      ];
+    }
+
+    return normalized;
+  }, [companies]);
+
+  const adminNewCompaniesSeries = useMemo(() => {
+    const monthLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const now = new Date();
+    const buckets = Array.from({ length: 6 }, (_value, idx) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (5 - idx), 1);
+      return {
+        key: `${date.getFullYear()}-${date.getMonth()}`,
+        month: monthLabels[date.getMonth()],
+        companies: 0,
+        revenue: 0
+      };
+    });
+
+    for (let idx = 0; idx < companies.length; idx += 1) {
+      const company = companies[idx];
+      const rawCreatedAt = String(
+        (company as unknown as { createdAt?: string; created_at?: string }).createdAt
+        || (company as unknown as { createdAt?: string; created_at?: string }).created_at
+        || ''
+      );
+
+      let date = new Date(rawCreatedAt);
+      if (Number.isNaN(date.getTime())) {
+        date = new Date(now.getFullYear(), now.getMonth() - (idx % 6), 1);
+      }
+
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+      const bucket = buckets.find((item) => item.key === key);
+
+      if (!bucket) {
+        continue;
+      }
+
+      bucket.companies += 1;
+      const planKey = String(company.plan || 'BASIC').toUpperCase();
+      bucket.revenue += Number(adminPlanPriceMap[planKey] || 0);
+    }
+
+    const hasData = buckets.some((item) => item.companies > 0 || item.revenue > 0);
+
+    if (!hasData) {
+      return [
+        { month: 'Jan', companies: 2, revenue: 800 },
+        { month: 'Fev', companies: 3, revenue: 1400 },
+        { month: 'Mar', companies: 4, revenue: 1800 },
+        { month: 'Abr', companies: 5, revenue: 2300 },
+        { month: 'Mai', companies: 6, revenue: 3100 },
+        { month: 'Jun', companies: 7, revenue: 3900 }
+      ];
+    }
+
+    return buckets.map((item) => ({
+      month: item.month,
+      companies: item.companies,
+      revenue: item.revenue
+    }));
+  }, [companies, adminPlanPriceMap]);
+
+  const adminOverview = useMemo(() => {
+    const totalCompanies = companies.length;
+    const inactiveStatuses = new Set<CompanyStatus>(['BLOCKED', 'CANCELED', 'PAST_DUE']);
+    const activeCompanies = companies.filter((company) => !inactiveStatuses.has((company.subscription_status || company.subscriptionStatus || 'ACTIVE') as CompanyStatus));
+    const inactiveCompanies = totalCompanies - activeCompanies.length;
+
+    const mrr = activeCompanies.reduce((acc, company) => {
+      const planKey = String(company.plan || 'BASIC').toUpperCase();
+      return acc + Number(adminPlanPriceMap[planKey] || 0);
+    }, 0);
+
+    const currentRevenue = Number(adminNewCompaniesSeries[adminNewCompaniesSeries.length - 1]?.revenue || 0);
+    const previousRevenue = Number(adminNewCompaniesSeries[adminNewCompaniesSeries.length - 2]?.revenue || 0);
+    const monthlyGrowth = previousRevenue > 0 ? ((currentRevenue - previousRevenue) / previousRevenue) * 100 : currentRevenue > 0 ? 100 : 0;
+
+    return {
+      mrr,
+      totalCompanies,
+      monthlyGrowth,
+      activeCompanies: activeCompanies.length,
+      inactiveCompanies
+    };
+  }, [companies, adminPlanPriceMap, adminNewCompaniesSeries]);
+
   const fetchAdminData = async () => {
     if (role !== 'ADMIN' || !token) {
       return;
@@ -1316,6 +1484,184 @@ const Dashboard = () => {
       setManagedUsers((result.users || []) as ManagedUser[]);
     } catch (_error) {
       setStatus('Erro de rede ao carregar area administrativa.');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const openPlanEditor = (plan?: AdminPlanConfig) => {
+    if (!plan) {
+      setPlanEditorId(null);
+      setPlanEditorName('');
+      setPlanEditorPrice('');
+      setPlanEditorFeatures('');
+      return;
+    }
+
+    setPlanEditorId(plan.id);
+    setPlanEditorName(plan.name);
+    setPlanEditorPrice(String(Number(plan.price || 0)));
+    setPlanEditorFeatures(plan.features.join('\n'));
+  };
+
+  const savePlanEditor = () => {
+    const name = planEditorName.trim().toUpperCase();
+    const price = Number(planEditorPrice);
+
+    if (!name) {
+      setStatus('Informe o nome do plano.');
+      return;
+    }
+
+    if (!Number.isFinite(price) || price < 0) {
+      setStatus('Informe um preco valido para o plano.');
+      return;
+    }
+
+    const features = planEditorFeatures
+      .split('\n')
+      .map((feature) => feature.trim())
+      .filter(Boolean);
+
+    setPlanCatalog((current) => {
+      const id = (planEditorId || name).toUpperCase();
+      const next: AdminPlanConfig = { id, name, price, features };
+
+      if (current.some((item) => item.id === id)) {
+        return current.map((item) => (item.id === id ? next : item));
+      }
+
+      return [...current, next];
+    });
+
+    setStatus('Plano salvo com sucesso.');
+    showToast('Plano atualizado');
+    openPlanEditor();
+  };
+
+  const deletePlanItem = (planId: string) => {
+    const normalizedId = String(planId || '').toUpperCase();
+
+    if (!normalizedId || ['BASIC', 'PRO', 'PREMIUM'].includes(normalizedId)) {
+      setStatus('Os planos padrao nao podem ser removidos.');
+      return;
+    }
+
+    setPlanCatalog((current) => current.filter((item) => item.id !== normalizedId));
+
+    if (planEditorId === normalizedId) {
+      openPlanEditor();
+    }
+
+    setStatus('Plano removido com sucesso.');
+    showToast('Plano removido');
+  };
+
+  const updateCompanyPlanOrStatus = async (
+    company: Company,
+    updates: { plan?: CompanyPlan; status?: CompanyStatus }
+  ) => {
+    if (!token) {
+      return;
+    }
+
+    setAdminLoading(true);
+
+    try {
+      const response = await fetch(`/api/admin/companies/${company.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: String(company.name || '').trim(),
+          location: String(company.location || '').trim() || null,
+          plan: updates.plan || (company.plan || 'BASIC'),
+          status: updates.status || ((company.subscription_status || company.subscriptionStatus || 'ACTIVE') as CompanyStatus)
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao atualizar empresa.');
+        return;
+      }
+
+      await fetchAdminData();
+      setStatus('Empresa atualizada com sucesso.');
+      showToast('Empresa atualizada');
+    } catch (_error) {
+      setStatus('Erro de rede ao atualizar empresa.');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const toggleCompanyBlocked = async (company: Company) => {
+    const currentStatus = (company.subscription_status || company.subscriptionStatus || 'ACTIVE') as CompanyStatus;
+    const nextStatus: CompanyStatus = currentStatus === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED';
+    await updateCompanyPlanOrStatus(company, { status: nextStatus });
+  };
+
+  const setCompanyPlanQuick = async (company: Company, plan: CompanyPlan) => {
+    await updateCompanyPlanOrStatus(company, { plan });
+  };
+
+  const accessCompanyContext = (targetCompanyId: string) => {
+    const normalized = String(targetCompanyId || '').trim();
+    if (!normalized) {
+      return;
+    }
+
+    setSettingsCompanyId(normalized);
+    setSalesCompanyId(normalized);
+    setProductCompanyId(normalized);
+    setActiveView('sales');
+    setActiveMenuName('Relatorios');
+    setStatus('Contexto da empresa carregado.');
+    showToast('Acessando empresa no modo cliente');
+  };
+
+  const toggleUserEnabled = async (user: ManagedUser) => {
+    if (!token || user.role !== 'CLIENT') {
+      return;
+    }
+
+    const currentAccessUntil = String(user.access_until || user.accessUntil || '').trim();
+    const currentlyDisabled = Boolean(currentAccessUntil && new Date(currentAccessUntil).getTime() < Date.now());
+    const nextAccessUntil = currentlyDisabled ? null : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    setAdminLoading(true);
+
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: String(user.name || '').trim(),
+          email: String(user.email || '').trim(),
+          role: user.role,
+          companyId: String(user.company_id || user.companyId || '').trim() || null,
+          companyName: null,
+          accessUntil: nextAccessUntil
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao atualizar usuario.');
+        return;
+      }
+
+      await fetchAdminData();
+      setStatus(currentlyDisabled ? 'Usuario habilitado com sucesso.' : 'Usuario desabilitado com sucesso.');
+      showToast(currentlyDisabled ? 'Usuario habilitado' : 'Usuario desabilitado');
+    } catch (_error) {
+      setStatus('Erro de rede ao atualizar usuario.');
     } finally {
       setAdminLoading(false);
     }
@@ -1873,6 +2219,13 @@ const Dashboard = () => {
   }, [activeView, token, settingsCompanyId, selectedSupportRequestId]);
 
   useEffect(() => {
+    if (activeView === 'admin' && role === 'ADMIN') {
+      void fetchAdminData();
+      void fetchSupportRequests();
+    }
+  }, [activeView, role, token]);
+
+  useEffect(() => {
     if (!token) {
       return;
     }
@@ -1999,6 +2352,12 @@ const Dashboard = () => {
       window.localStorage.setItem('dashboard-theme', uiTheme);
     }
   }, [uiTheme]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('syncho-admin-plan-catalog', JSON.stringify(planCatalog));
+    }
+  }, [planCatalog]);
 
   const handleCreateLead = async () => {
     if (!token || !companyId || !formColumn) {
@@ -2975,6 +3334,7 @@ const Dashboard = () => {
 
   const menuItems: SidebarMenuItem[] = [
     { name: 'Dashboard', icon: LayoutDashboard, path: 'companies', group: 'Comercial', adminOnly: true },
+    { name: 'Admin SaaS', icon: Sparkles, path: 'admin', group: 'Comercial', adminOnly: true },
     { name: 'Relatorios', icon: BarChart3, path: 'sales', group: 'Comercial' },
     { name: 'Analise', icon: Activity, path: 'analytics', group: 'Comercial' },
     { name: 'Funil de vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
@@ -3146,6 +3506,7 @@ const Dashboard = () => {
             { key: 'products' as const, icon: Package, label: 'Produtos' },
             { key: 'inventory' as const, icon: Boxes, label: 'Estoque' },
             ...(role === 'ADMIN' ? [
+              { key: 'admin' as const, icon: Sparkles, label: 'Admin' },
               { key: 'companies' as const, icon: LayoutDashboard, label: 'Empresas' },
               { key: 'clients' as const, icon: Users, label: 'Clientes' },
             ] : []),
@@ -3785,6 +4146,406 @@ const Dashboard = () => {
 
           <p className="mt-4 text-sm text-slate-500">{status}</p>
             </>
+          ) : null}
+
+          {role === 'ADMIN' && activeView === 'admin' ? (
+            <div className="grid gap-6">
+              <div className={[
+                'rounded-2xl border p-5',
+                isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(34,211,238,0.12)]' : 'border-slate-200 bg-white'
+              ].join(' ')}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Admin Dashboard SaaS</h1>
+                    <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Painel central para gerenciar receita, empresas, usuarios, planos e suporte.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { key: 'overview' as const, label: 'Dashboard' },
+                      { key: 'companies' as const, label: 'Empresas' },
+                      { key: 'users' as const, label: 'Usuarios' },
+                      { key: 'plans' as const, label: 'Planos' },
+                      { key: 'support' as const, label: 'Suporte' }
+                    ].map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setAdminSection(tab.key)}
+                        className={[
+                          'rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all',
+                          adminSection === tab.key
+                            ? isDarkTheme ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-300' : 'border-blue-300 bg-blue-50 text-blue-700'
+                            : isDarkTheme ? 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        ].join(' ')}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {adminSection === 'overview' ? (
+                <div className="grid gap-5">
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {[
+                      {
+                        label: 'MRR Total',
+                        value: formatCurrency(adminOverview.mrr),
+                        sub: 'Receita recorrente mensal',
+                        glow: 'shadow-[0_0_20px_rgba(59,130,246,0.22)]',
+                        border: 'border-blue-500/20',
+                        icon: DollarSign
+                      },
+                      {
+                        label: 'Empresas',
+                        value: String(adminOverview.totalCompanies),
+                        sub: `${adminOverview.activeCompanies} ativas`,
+                        glow: 'shadow-[0_0_20px_rgba(168,85,247,0.22)]',
+                        border: 'border-purple-500/20',
+                        icon: LayoutDashboard
+                      },
+                      {
+                        label: 'Crescimento',
+                        value: `${adminOverview.monthlyGrowth >= 0 ? '+' : ''}${adminOverview.monthlyGrowth.toFixed(1)}%`,
+                        sub: 'Comparado ao ultimo mes',
+                        glow: 'shadow-[0_0_20px_rgba(16,185,129,0.22)]',
+                        border: 'border-emerald-500/20',
+                        icon: TrendingUp
+                      },
+                      {
+                        label: 'Ativas vs Inativas',
+                        value: `${adminOverview.activeCompanies} / ${adminOverview.inactiveCompanies}`,
+                        sub: 'Saude da base de clientes',
+                        glow: 'shadow-[0_0_20px_rgba(244,63,94,0.2)]',
+                        border: 'border-rose-500/20',
+                        icon: Activity
+                      }
+                    ].map((card) => {
+                      const Icon = card.icon;
+                      return (
+                        <motion.div
+                          key={card.label}
+                          whileHover={{ y: -3, scale: 1.01 }}
+                          className={[
+                            'rounded-2xl border p-4 transition-all',
+                            isDarkTheme ? `bg-[#0d1117] ${card.border} ${card.glow}` : 'border-slate-200 bg-white'
+                          ].join(' ')}
+                        >
+                          <div className="flex items-center justify-between">
+                            <p className={['text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{card.label}</p>
+                            <span className="rounded-lg bg-white/10 p-1.5">
+                              <Icon className={['h-4 w-4', isDarkTheme ? 'text-cyan-300' : 'text-blue-600'].join(' ')} />
+                            </span>
+                          </div>
+                          <p className={['mt-3 text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{card.value}</p>
+                          <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>{card.sub}</p>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-3">
+                    <div className={['xl:col-span-2 rounded-2xl border p-5', isDarkTheme ? 'border-blue-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(59,130,246,0.14)]' : 'border-slate-200 bg-white'].join(' ')}>
+                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Revenue Over Time</h3>
+                      <p className={['mb-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Evolucao mensal de receita recorrente</p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <LineChart data={adminNewCompaniesSeries}>
+                          <defs>
+                            <filter id="adminRevenueGlow" x="-50%" y="-50%" width="200%" height="200%">
+                              <feGaussianBlur stdDeviation="2.5" result="blur" />
+                              <feMerge>
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="SourceGraphic" />
+                              </feMerge>
+                            </filter>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'} />
+                          <XAxis dataKey="month" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
+                          <YAxis tickFormatter={(v) => `R$${(Number(v) / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} width={56} />
+                          <Tooltip
+                            formatter={(v: unknown) => [formatCurrency(Number(v)), 'MRR']}
+                            contentStyle={{
+                              background: isDarkTheme ? '#0f172a' : '#fff',
+                              border: isDarkTheme ? '1px solid rgba(59,130,246,0.35)' : '1px solid #e2e8f0',
+                              borderRadius: '10px',
+                              color: isDarkTheme ? '#f8fafc' : '#0f172a',
+                              fontSize: 12
+                            }}
+                          />
+                          <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={3} filter="url(#adminRevenueGlow)" dot={{ fill: '#60a5fa', r: 3 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-purple-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(168,85,247,0.14)]' : 'border-slate-200 bg-white'].join(' ')}>
+                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Plan Distribution</h3>
+                      <p className={['mb-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Participacao por plano</p>
+                      <ResponsiveContainer width="100%" height={210}>
+                        <PieChart>
+                          <Pie data={adminPlanDistributionData} dataKey="value" nameKey="name" innerRadius={46} outerRadius={72} paddingAngle={4}>
+                            {adminPlanDistributionData.map((entry, index) => (
+                              <Cell key={entry.name} fill={['#3b82f6', '#8b5cf6', '#f43f5e'][index % 3]} style={{ filter: 'drop-shadow(0 0 5px rgba(59,130,246,0.25))' }} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(v: unknown) => [Number(v), 'Empresas']}
+                            contentStyle={{
+                              background: isDarkTheme ? '#0f172a' : '#fff',
+                              border: isDarkTheme ? '1px solid rgba(168,85,247,0.35)' : '1px solid #e2e8f0',
+                              borderRadius: '10px',
+                              color: isDarkTheme ? '#f8fafc' : '#0f172a',
+                              fontSize: 12
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(34,211,238,0.14)]' : 'border-slate-200 bg-white'].join(' ')}>
+                    <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>New Companies Per Month</h3>
+                    <p className={['mb-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Entrada de novos clientes por mes</p>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={adminNewCompaniesSeries}>
+                        <defs>
+                          <linearGradient id="adminCompaniesBar" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#06b6d4" />
+                            <stop offset="100%" stopColor="#2563eb" />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'} vertical={false} />
+                        <XAxis dataKey="month" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
+                        <Tooltip
+                          formatter={(v: unknown) => [Number(v), 'Empresas']}
+                          contentStyle={{
+                            background: isDarkTheme ? '#0f172a' : '#fff',
+                            border: isDarkTheme ? '1px solid rgba(6,182,212,0.35)' : '1px solid #e2e8f0',
+                            borderRadius: '10px',
+                            color: isDarkTheme ? '#f8fafc' : '#0f172a',
+                            fontSize: 12
+                          }}
+                        />
+                        <Bar dataKey="companies" fill="url(#adminCompaniesBar)" radius={[8, 8, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              ) : null}
+
+              {adminSection === 'companies' ? (
+                <div className={themedPanelClass}>
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Gestao de empresas</h2>
+                    <button type="button" onClick={() => void fetchAdminData()} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'}>Atualizar</button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[860px] text-sm">
+                      <thead>
+                        <tr className={isDarkTheme ? 'border-b border-white/10 text-slate-400' : 'border-b border-slate-100 text-slate-500'}>
+                          <th className="px-2 py-2 text-left">Empresa</th>
+                          <th className="px-2 py-2 text-left">Plano</th>
+                          <th className="px-2 py-2 text-left">Status</th>
+                          <th className="px-2 py-2 text-left">Expiracao</th>
+                          <th className="px-2 py-2 text-right">Acoes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {companies.map((company) => {
+                          const status = (company.subscription_status || company.subscriptionStatus || 'ACTIVE') as CompanyStatus;
+                          const expiresAt = String(company.expires_at || company.expiresAt || '').slice(0, 10) || 'Sem limite';
+                          const companyPlan = (company.plan || 'BASIC') as CompanyPlan;
+                          return (
+                            <tr key={company.id} className={isDarkTheme ? 'border-b border-white/5' : 'border-b border-slate-100'}>
+                              <td className="px-2 py-3">
+                                <p className={['font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{company.name}</p>
+                                <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>{company.id}</p>
+                              </td>
+                              <td className="px-2 py-3">
+                                <select
+                                  value={companyPlan}
+                                  onChange={(event) => void setCompanyPlanQuick(company, event.target.value as CompanyPlan)}
+                                  className={isDarkTheme ? 'rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-100' : 'rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700'}
+                                >
+                                  <option value="BASIC">BASIC</option>
+                                  <option value="PRO">PRO</option>
+                                  <option value="PREMIUM">PREMIUM</option>
+                                </select>
+                              </td>
+                              <td className="px-2 py-3">
+                                <span className={[
+                                  'rounded-full px-2 py-1 text-xs font-semibold',
+                                  status === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'
+                                ].join(' ')}>
+                                  {status}
+                                </span>
+                              </td>
+                              <td className={['px-2 py-3 text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{expiresAt}</td>
+                              <td className="px-2 py-3 text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  <button type="button" onClick={() => void toggleCompanyBlocked(company)} className={status === 'BLOCKED' ? 'rounded-lg border border-emerald-400/40 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10' : 'rounded-lg border border-rose-400/40 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/10'}>
+                                    {status === 'BLOCKED' ? 'Desbloquear' : 'Bloquear'}
+                                  </button>
+                                  <button type="button" onClick={() => accessCompanyContext(company.id)} className={isDarkTheme ? 'rounded-lg border border-cyan-400/40 px-2.5 py-1 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10' : 'rounded-lg border border-blue-200 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50'}>
+                                    Acessar empresa
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {adminSection === 'users' ? (
+                <div className={themedPanelClass}>
+                  <h2 className={['mb-4 text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Gestao de usuarios por empresa</h2>
+                  <div className="grid gap-4">
+                    {Object.entries(
+                      managedUsers.reduce<Record<string, ManagedUser[]>>((acc, user) => {
+                        const key = String(user.company_id || user.companyId || 'Sem empresa');
+                        if (!acc[key]) {
+                          acc[key] = [];
+                        }
+                        acc[key].push(user);
+                        return acc;
+                      }, {})
+                    ).map(([companyRef, users]) => (
+                      <div key={companyRef} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
+                        <p className={['mb-3 text-sm font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>
+                          {companyOptions.find((opt) => opt.id === companyRef)?.name || companyRef}
+                        </p>
+                        <div className="grid gap-2">
+                          {users.map((user) => {
+                            const accessUntil = String(user.access_until || user.accessUntil || '').trim();
+                            const disabled = Boolean(accessUntil && new Date(accessUntil).getTime() < Date.now());
+                            return (
+                              <div key={user.id} className={['flex items-center justify-between rounded-lg px-3 py-2', isDarkTheme ? 'bg-black/20' : 'bg-slate-50'].join(' ')}>
+                                <div>
+                                  <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{user.name}</p>
+                                  <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{user.email} · {user.role}</p>
+                                </div>
+                                {user.role === 'CLIENT' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void toggleUserEnabled(user)}
+                                    className={disabled ? 'rounded-lg border border-emerald-400/40 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10' : 'rounded-lg border border-rose-400/40 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/10'}
+                                  >
+                                    {disabled ? 'Habilitar' : 'Desabilitar'}
+                                  </button>
+                                ) : (
+                                  <span className={['text-xs font-semibold', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Administrador</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {adminSection === 'plans' ? (
+                <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+                  <div className={themedPanelClass}>
+                    <h2 className={['mb-4 text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Catalogo de planos</h2>
+                    <div className="grid gap-3">
+                      {planCatalog.map((plan) => (
+                        <div key={plan.id} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className={['text-sm font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{plan.name}</p>
+                              <p className={['text-xs', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>{formatCurrency(plan.price)}/mes</p>
+                              <p className={['mt-2 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{plan.features.join(' • ') || 'Sem features cadastradas'}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => openPlanEditor(plan)} className={isDarkTheme ? 'rounded-lg border border-white/10 px-2.5 py-1 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50'}>Editar</button>
+                              <button type="button" onClick={() => deletePlanItem(plan.id)} className="rounded-lg border border-rose-400/40 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/10">Excluir</button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className={themedPanelClass}>
+                    <h3 className={['text-base font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{planEditorId ? 'Editar plano' : 'Criar plano'}</h3>
+                    <div className="mt-3 grid gap-3">
+                      <input className={themedInputClass} placeholder="Nome (ex: ENTERPRISE)" value={planEditorName} onChange={(event) => setPlanEditorName(event.target.value)} />
+                      <input className={themedInputClass} type="number" min="0" step="1" placeholder="Preco mensal" value={planEditorPrice} onChange={(event) => setPlanEditorPrice(event.target.value)} />
+                      <textarea className={themedInputClass} rows={5} placeholder="Features (uma por linha)" value={planEditorFeatures} onChange={(event) => setPlanEditorFeatures(event.target.value)} />
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <button type="button" onClick={savePlanEditor} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500">Salvar plano</button>
+                      <button type="button" onClick={() => openPlanEditor()} className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'}>Limpar</button>
+                    </div>
+                    <p className={['mt-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                      Valores e recursos ficam salvos no navegador para simulacao administrativa.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
+              {adminSection === 'support' ? (
+                <div className={themedPanelClass}>
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Central de suporte</h2>
+                    <button type="button" onClick={() => void fetchSupportRequests()} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'}>Atualizar</button>
+                  </div>
+                  <div className="grid gap-3">
+                    {supportRequests.map((request) => (
+                      <div key={request.id} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{request.subject || 'Chamado sem assunto'}</p>
+                            <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{request.requesterName || request.requesterEmail || 'Cliente'} · {String(request.createdAt || '').slice(0, 10)}</p>
+                            <p className={['mt-2 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>{request.message}</p>
+                          </div>
+                          <div className="grid gap-2">
+                            <select
+                              value={supportDrafts[request.id]?.status || request.status}
+                              onChange={(event) =>
+                                setSupportDrafts((current) => ({
+                                  ...current,
+                                  [request.id]: {
+                                    status: event.target.value as SupportRequestStatus,
+                                    adminResponse: current[request.id]?.adminResponse || request.adminResponse || ''
+                                  }
+                                }))
+                              }
+                              className={isDarkTheme ? 'rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-100' : 'rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700'}
+                            >
+                              <option value="PENDING">Pendente</option>
+                              <option value="IN_REVIEW">Em analise</option>
+                              <option value="DONE">Resolvido</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => void saveSupportRequestByAdmin(request.id, request.companyId)}
+                              className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500"
+                            >
+                              Salvar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {!supportRequests.length ? (
+                      <p className={['text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                        Nenhuma solicitacao de suporte encontrada.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
 
           {role === 'ADMIN' && activeView === 'companies' ? (
