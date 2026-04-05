@@ -1551,13 +1551,13 @@ const Dashboard = () => {
       void fetchInventory();
       void fetchProducts();
     }
-  }, [activeView, token, companyId, role, productCompanyId]);
+  }, [activeView, token, productCompanyId]);
 
   useEffect(() => {
     if (activeView === 'settings') {
       void fetchSettings();
     }
-  }, [activeView, token, companyId, role, settingsCompanyId]);
+  }, [activeView, token, settingsCompanyId]);
 
   useEffect(() => {
     if (activeView === 'chat') {
@@ -1568,7 +1568,7 @@ const Dashboard = () => {
         void fetchSupportChatMessages(selectedSupportRequestId);
       }
     }
-  }, [activeView, token, companyId, role, settingsCompanyId, selectedSupportRequestId]);
+  }, [activeView, token, settingsCompanyId, selectedSupportRequestId]);
 
   useEffect(() => {
     if (!token) {
@@ -1592,28 +1592,6 @@ const Dashboard = () => {
     });
 
     socket.on('support:new-message', (incoming: SupportChatMessage) => {
-      const targetCompanyId = getTargetCompanyId(settingsCompanyId);
-
-      if (targetCompanyId && incoming.companyId !== targetCompanyId) {
-        return;
-      }
-
-      const isOwnMessage = incoming.senderId === currentUserId;
-      const isCurrentThread = incoming.requestId && incoming.requestId === selectedSupportRequestId;
-
-      if (!isOwnMessage) {
-        if (activeView !== 'chat' || !isCurrentThread) {
-          setSupportUnreadCount((current) => current + 1);
-        }
-
-        showToast(`Nova mensagem de ${incoming.senderName || 'suporte'}`);
-        playSupportNotificationTone();
-      }
-
-      if (!isCurrentThread) {
-        return;
-      }
-
       setSupportChatMessages((current) => {
         if (current.some((msg) => msg.id === incoming.id)) {
           return current;
@@ -1621,17 +1599,15 @@ const Dashboard = () => {
 
         return [...current, incoming];
       });
+      
+      showToast(`Nova mensagem de ${incoming.senderName || 'suporte'}`);
+      playSupportNotificationTone();
+      setSupportUnreadCount((current) => current + 1);
     });
 
     socket.on(
       'support:presence',
       (presence: { companyId: string; adminOnline: boolean; clientOnline: boolean }) => {
-        const targetCompanyId = getTargetCompanyId(settingsCompanyId);
-
-        if (!targetCompanyId || presence.companyId !== targetCompanyId) {
-          return;
-        }
-
         setSupportAdminOnline(Boolean(presence.adminOnline));
       }
     );
@@ -1646,20 +1622,6 @@ const Dashboard = () => {
         userRole: 'ADMIN' | 'CLIENT';
         isTyping: boolean;
       }) => {
-        const targetCompanyId = getTargetCompanyId(settingsCompanyId);
-
-        if (!targetCompanyId || typingPayload.companyId !== targetCompanyId) {
-          return;
-        }
-
-        if (!selectedSupportRequestId || typingPayload.requestId !== selectedSupportRequestId) {
-          return;
-        }
-
-        if (typingPayload.userId === currentUserId) {
-          return;
-        }
-
         if (!typingPayload.isTyping) {
           setSupportTypingText('');
           return;
@@ -1689,11 +1651,20 @@ const Dashboard = () => {
     });
 
     return () => {
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('support:new-message');
+      socket.off('support:presence');
+      socket.off('support:typing');
+      socket.off('support:error');
       socket.disconnect();
       supportSocketRef.current = null;
       setSupportChatConnected(false);
+      if (supportTypingTimeoutRef.current) {
+        window.clearTimeout(supportTypingTimeoutRef.current);
+      }
     };
-  }, [token, activeView, settingsCompanyId, role, companyId, currentUserId, selectedSupportRequestId]);
+  }, [token]);
 
   useEffect(() => {
     if (activeView !== 'chat') {
@@ -1707,7 +1678,7 @@ const Dashboard = () => {
     }
 
     supportSocketRef.current.emit('support:join', { companyId: targetCompanyId });
-  }, [activeView, settingsCompanyId, role, companyId, supportChatConnected]);
+  }, [activeView, settingsCompanyId]);
 
   useEffect(() => {
     if (activeView === 'sales') {
@@ -1719,7 +1690,7 @@ const Dashboard = () => {
     if (activeView === 'pipeline') {
       void fetchSalesAnalysis({ silent: true });
     }
-  }, [activeView, token, companyId, role, salesCompanyId]);
+  }, [activeView, token, salesCompanyId]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
