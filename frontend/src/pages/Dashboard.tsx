@@ -1547,6 +1547,21 @@ const Dashboard = () => {
     );
   };
 
+  const updateSaleLineQuantityFromInput = (lineId: number, rawValue: string) => {
+    const digitsOnly = String(rawValue || '').replace(/\D/g, '');
+
+    if (!digitsOnly) {
+      updateSaleLine(lineId, { quantity: 0 });
+      return;
+    }
+
+    updateSaleLine(lineId, { quantity: Number(digitsOnly) });
+  };
+
+  const normalizeSaleLineQuantity = (lineId: number, value: number) => {
+    updateSaleLine(lineId, { quantity: Number.isFinite(value) && value > 0 ? Math.floor(value) : 1 });
+  };
+
   const removeSaleLine = (lineId: number) => {
     setSaleLines((currentLines) => {
       const nextLines = currentLines.filter((line) => line.id !== lineId);
@@ -2681,10 +2696,12 @@ const Dashboard = () => {
                             ? 'border border-white/10 bg-white/5 text-slate-100 focus:ring-2 focus:ring-cyan-500/40'
                             : 'border border-slate-200 bg-slate-50'
                         ].join(' ')}
-                        type="number"
-                        min={1}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         value={line.quantity}
-                        onChange={(event) => updateSaleLine(line.id, { quantity: Number(event.target.value || 1) })}
+                        onChange={(event) => updateSaleLineQuantityFromInput(line.id, event.target.value)}
+                        onBlur={() => normalizeSaleLineQuantity(line.id, line.quantity)}
                       />
 
                       <button
