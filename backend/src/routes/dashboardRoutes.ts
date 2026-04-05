@@ -18,6 +18,7 @@ const router = Router();
 
 const tableAliases = {
   products: ['products', 'Product'],
+  inventory: ['stock', 'inventory', 'inventories'],
   sales: ['sales', 'Sale'],
   leads: ['leads', 'Lead'],
   messages: ['messages', 'Message'],
@@ -27,6 +28,7 @@ const tableAliases = {
 } as const;
 
 const companyFieldAliases = ['company_id', 'companyId', 'companyID'];
+const productFieldAliases = ['product_id', 'productId'];
 const leadStatuses = [
   'NOVO_CONTATO',
   'EM_CONTATO',
@@ -356,6 +358,117 @@ const getProductByIdWithAliases = async (productId: string, companyId: string) =
   };
 };
 
+const getInventoryByProductWithAliases = async (productId: string, companyId: string) => {
+  for (const tableName of tableAliases.inventory) {
+    for (const companyField of companyFieldAliases) {
+      for (const productField of productFieldAliases) {
+        const response = await supabaseAdmin
+          .from(tableName)
+          .select('*')
+          .eq(companyField, companyId)
+          .eq(productField, productId)
+          .single();
+
+        if (!response.error && response.data) {
+          return response;
+        }
+      }
+    }
+  }
+
+  return {
+    data: null,
+    error: { message: 'Registro de estoque nao encontrado.' }
+  };
+};
+
+const listInventoryByCompanyWithAliases = async (companyId: string) => {
+  for (const tableName of tableAliases.inventory) {
+    for (const companyField of companyFieldAliases) {
+      const response = await supabaseAdmin
+        .from(tableName)
+        .select('*')
+        .eq(companyField, companyId)
+        .order('updated_at', { ascending: false });
+
+      if (!response.error) {
+        return response;
+      }
+    }
+  }
+
+  return {
+    data: [],
+    error: { message: 'Falha ao carregar estoque.' }
+  };
+};
+
+const createInventoryRecordWithAliases = async (productId: string, companyId: string, quantity = 0) => {
+  const normalizedQuantity = Number.isFinite(quantity) && quantity >= 0 ? Math.floor(quantity) : 0;
+
+  for (const tableName of tableAliases.inventory) {
+    for (const companyField of companyFieldAliases) {
+      for (const productField of productFieldAliases) {
+        const payload = {
+          [companyField]: companyId,
+          [productField]: productId,
+          quantity: normalizedQuantity,
+          updated_at: new Date().toISOString()
+        };
+
+        const response = await supabaseAdmin.from(tableName).insert(payload).select('*').single();
+
+        if (!response.error && response.data) {
+          return response;
+        }
+      }
+    }
+  }
+
+  return {
+    data: null,
+    error: { message: 'Falha ao criar registro inicial de estoque.' }
+  };
+};
+
+const updateInventoryQuantityWithAliases = async (productId: string, companyId: string, quantity: number) => {
+  const normalizedQuantity = Number.isFinite(quantity) && quantity >= 0 ? Math.floor(quantity) : 0;
+
+  for (const tableName of tableAliases.inventory) {
+    for (const companyField of companyFieldAliases) {
+      for (const productField of productFieldAliases) {
+        const response = await supabaseAdmin
+          .from(tableName)
+          .update({ quantity: normalizedQuantity, updated_at: new Date().toISOString() })
+          .eq(companyField, companyId)
+          .eq(productField, productId)
+          .select('*')
+          .single();
+
+        if (!response.error && response.data) {
+          return response;
+        }
+      }
+    }
+  }
+
+  return createInventoryRecordWithAliases(productId, companyId, normalizedQuantity);
+};
+
+const deleteInventoryByProductWithAliases = async (productId: string, companyId: string) => {
+  for (const tableName of tableAliases.inventory) {
+    for (const companyField of companyFieldAliases) {
+      for (const productField of productFieldAliases) {
+        await supabaseAdmin
+          .from(tableName)
+          .delete()
+          .eq(companyField, companyId)
+          .eq(productField, productId);
+      }
+    }
+  }
+};
+
 const getCompanyByIdWithAliases = async (companyId: string) => {
   for (const tableName of ['companies', 'Company']) {
     const response = await supabaseAdmin.from(tableName).select('*').eq('id', companyId).single();
@@ -550,13 +663,13 @@ router.post('/products', requireAuth, async (req, res) => {
   }
 
   const name = String(req.body?.name || '').trim();
-  const code = String(req.body?.code || '').trim();
+  const code = String(req.body?.code || '').trim() || `PRD-${Date.now().toString().slice(-6)}`;
   const price = Number(req.body?.price || 0);
-  const quantity = Number(req.body?.quantity || 0);
+  const description = String(req.body?.description || '').trim();
   const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
 
-  if (!name || !code || !Number.isFinite(price)) {
-    return res.status(400).json({ message: 'name, code e price sao obrigatorios.' });
+  if (!name || !Number.isFinite(price)) {
+    return res.status(400).json({ message: 'name e price sao obrigatorios.' });
   }
 
   if (!companyId) {
@@ -596,13 +709,20 @@ router.post('/products', requireAuth, async (req, res) => {
       name,
       code,
       price,
-      quantity,
+      description,
       [companyField]: companyId
     };
 
     const response = await insertWithAliases('products', payload);
 
     if (!response.error) {
+      const createdProduct = response.data as Record<string, unknown>;
+      const createdProductId = String(createdProduct?.id || '').trim();
+
+      if (createdProductId) {
+        await createInventoryRecordWithAliases(createdProductId, companyId, 0);
+      }
+
       return res.status(201).json({ message: 'Produto criado com sucesso.', product: response.data });
     }
 
@@ -630,9 +750,34 @@ router.get('/products', requireAuth, async (req, res) => {
     companyId
   });
 
+  const inventory = await listInventoryByCompanyWithAliases(companyId);
+  const quantityByProductId = new Map<string, number>();
+
+  for (const raw of (inventory.data || []) as Array<Record<string, unknown>>) {
+    const productId = String(raw.product_id || raw.productId || '').trim();
+
+    if (!productId) {
+      continue;
+    }
+
+    quantityByProductId.set(productId, Number(raw.quantity || 0));
+  }
+
+  const enrichedProducts = ((products.data || []) as Array<Record<string, unknown>>).map((product) => {
+    const productId = String(product.id || '').trim();
+    const quantity = quantityByProductId.has(productId)
+      ? Number(quantityByProductId.get(productId) || 0)
+      : Number(product.quantity || 0);
+
+    return {
+      ...product,
+      quantity: Number.isFinite(quantity) && quantity >= 0 ? quantity : 0
+    };
+  });
+
   return res.status(200).json({
     companyId,
-    products: products.data || [],
+    products: enrichedProducts,
     error: products.error || null
   });
 });
@@ -647,22 +792,27 @@ router.patch('/products/:id', requireAuth, async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const code = String(req.body?.code || '').trim();
   const price = Number(req.body?.price || 0);
-  const quantity = Number(req.body?.quantity || 0);
+  const description = String(req.body?.description || '').trim();
 
   if (!productId || !companyId) {
     return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
   }
 
-  if (!name || !code || !Number.isFinite(price) || !Number.isFinite(quantity)) {
-    return res.status(400).json({ message: 'name, code, price e quantity sao obrigatorios.' });
+  if (!name || !Number.isFinite(price)) {
+    return res.status(400).json({ message: 'name e price sao obrigatorios.' });
   }
 
-  const response = await updateProductWithAliases(productId, companyId, {
+  const payload: Record<string, unknown> = {
     name,
-    code,
     price,
-    quantity
-  });
+    description
+  };
+
+  if (code) {
+    payload.code = code;
+  }
+
+  const response = await updateProductWithAliases(productId, companyId, payload);
 
   if (!response.error) {
     return res.status(200).json({ message: 'Produto atualizado com sucesso.', product: response.data });
@@ -683,6 +833,8 @@ router.delete('/products/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
   }
 
+  await deleteInventoryByProductWithAliases(productId, companyId);
+
   for (const tableName of tableAliases.products) {
     for (const companyField of companyFieldAliases) {
       const response = await supabaseAdmin
@@ -698,6 +850,116 @@ router.delete('/products/:id', requireAuth, async (req, res) => {
   }
 
   return res.status(400).json({ message: 'Falha ao excluir produto.' });
+});
+
+router.get('/inventory', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio para consultar estoque.' });
+  }
+
+  const productsResponse = await getScopedData('products', {
+    id: req.authUser.id,
+    email: req.authUser.email,
+    role: 'CLIENT',
+    companyId
+  });
+  const inventoryResponse = await listInventoryByCompanyWithAliases(companyId);
+
+  const products = (productsResponse.data || []) as Array<Record<string, unknown>>;
+  const quantityByProductId = new Map<string, number>();
+
+  for (const row of (inventoryResponse.data || []) as Array<Record<string, unknown>>) {
+    const productId = String(row.product_id || row.productId || '').trim();
+
+    if (!productId) {
+      continue;
+    }
+
+    quantityByProductId.set(productId, Number(row.quantity || 0));
+  }
+
+  const inventory = products.map((product) => {
+    const productId = String(product.id || '').trim();
+    const quantity = quantityByProductId.has(productId)
+      ? Number(quantityByProductId.get(productId) || 0)
+      : Number(product.quantity || 0);
+
+    return {
+      id: productId,
+      product_id: productId,
+      company_id: String(product.company_id || product.companyId || companyId),
+      name: String(product.name || 'Produto sem nome'),
+      quantity: Number.isFinite(quantity) && quantity >= 0 ? quantity : 0,
+      updated_at: String(new Date().toISOString())
+    };
+  });
+
+  return res.status(200).json({ companyId, inventory });
+});
+
+router.patch('/inventory/:productId', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const productId = String(req.params.productId || '').trim();
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+  const action = String(req.body?.action || '').trim().toLowerCase();
+  const amount = Math.floor(Number(req.body?.amount || 1));
+
+  if (!productId || !companyId) {
+    return res.status(400).json({ message: 'productId e companyId sao obrigatorios.' });
+  }
+
+  if (!['add', 'remove'].includes(action) || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ message: 'action (add/remove) e amount (>0) sao obrigatorios.' });
+  }
+
+  const productResponse = await getProductByIdWithAliases(productId, companyId);
+
+  if (productResponse.error || !productResponse.data) {
+    return res.status(404).json({ message: 'Produto nao encontrado para atualizar estoque.' });
+  }
+
+  const inventoryResponse = await getInventoryByProductWithAliases(productId, companyId);
+  const currentQuantity = inventoryResponse.data
+    ? Number((inventoryResponse.data as Record<string, unknown>).quantity || 0)
+    : Number((productResponse.data as Record<string, unknown>).quantity || 0);
+
+  const safeCurrent = Number.isFinite(currentQuantity) && currentQuantity >= 0 ? currentQuantity : 0;
+  const nextQuantity = action === 'add' ? safeCurrent + amount : safeCurrent - amount;
+
+  if (nextQuantity < 0) {
+    return res.status(400).json({ message: 'Nao e permitido estoque negativo.' });
+  }
+
+  const updated = await updateInventoryQuantityWithAliases(productId, companyId, nextQuantity);
+
+  if (updated.error) {
+    return res.status(400).json({ message: updated.error.message || 'Falha ao atualizar estoque.' });
+  }
+
+  await insertWithAliases('stockMovements', {
+    product_id: productId,
+    type: action === 'add' ? 'IN' : 'OUT',
+    quantity: amount,
+    reason: `Ajuste manual de estoque (${action})`
+  });
+
+  return res.status(200).json({
+    message: 'Estoque atualizado com sucesso.',
+    inventory: {
+      productId,
+      quantity: nextQuantity,
+      companyId
+    }
+  });
 });
 
 router.post('/sales', requireAuth, async (req, res) => {
@@ -830,7 +1092,10 @@ router.post('/sales/checkout', requireAuth, async (req, res) => {
     }
 
     const product = productResponse.data as Record<string, unknown>;
-    const stockBefore = Number(product.quantity || 0);
+    const inventoryResponse = await getInventoryByProductWithAliases(item.productId, companyId);
+    const stockBefore = inventoryResponse.data
+      ? Number((inventoryResponse.data as Record<string, unknown>).quantity || 0)
+      : Number(product.quantity || 0);
     const unitPrice = Number(product.price || 0);
 
     if (!Number.isFinite(stockBefore) || stockBefore < item.quantity) {
@@ -894,9 +1159,7 @@ router.post('/sales/checkout', requireAuth, async (req, res) => {
   }
 
   for (const item of normalizedItems) {
-    await updateProductWithAliases(item.productId, companyId, {
-      quantity: item.stockAfter
-    });
+    await updateInventoryQuantityWithAliases(item.productId, companyId, item.stockAfter);
 
     await insertWithAliases('saleItems', {
       sale_id: saleId,
@@ -955,16 +1218,50 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
     role: 'CLIENT',
     companyId
   });
+  const inventoryResponse = await listInventoryByCompanyWithAliases(companyId);
 
   const sales = (salesResponse.data || []) as Array<Record<string, unknown>>;
   const products = (productsResponse.data || []) as Array<Record<string, unknown>>;
+  const inventoryRows = (inventoryResponse.data || []) as Array<Record<string, unknown>>;
+
+  const quantityByProductId = new Map<string, number>();
+
+  for (const row of inventoryRows) {
+    const productId = String(row.product_id || row.productId || '').trim();
+
+    if (!productId) {
+      continue;
+    }
+
+    quantityByProductId.set(productId, Number(row.quantity || 0));
+  }
 
   const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
   const totalSales = sales.length;
   const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
-  const totalStockUnits = products.reduce((sum, product) => sum + Number(product.quantity || 0), 0);
+  const totalStockUnits = products.reduce((sum, product) => {
+    const productId = String(product.id || '').trim();
+    const quantity = quantityByProductId.has(productId)
+      ? Number(quantityByProductId.get(productId) || 0)
+      : Number(product.quantity || 0);
 
-  const lowStockProducts = products
+    return sum + (Number.isFinite(quantity) ? quantity : 0);
+  }, 0);
+
+  const enrichedProductsForStock = products.map((product) => {
+    const rawProduct = product as Record<string, unknown>;
+    const productId = String(rawProduct.id || '').trim();
+    const quantity = quantityByProductId.has(productId)
+      ? Number(quantityByProductId.get(productId) || 0)
+      : Number(rawProduct.quantity || 0);
+
+    return {
+      ...rawProduct,
+      quantity: Number.isFinite(quantity) ? quantity : 0
+    } as Record<string, unknown>;
+  });
+
+  const lowStockProducts = enrichedProductsForStock
     .filter((product) => Number(product.quantity || 0) <= 5)
     .sort((left, right) => Number(left.quantity || 0) - Number(right.quantity || 0))
     .slice(0, 10)
@@ -999,7 +1296,7 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
     productsCount: products.length,
     lowStockProducts,
     recentSales,
-    errors: [salesResponse.error, productsResponse.error].filter(Boolean)
+    errors: [salesResponse.error, productsResponse.error, inventoryResponse.error].filter(Boolean)
   });
 });
 
