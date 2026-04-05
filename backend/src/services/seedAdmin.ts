@@ -34,6 +34,7 @@ export const ensureAdminUser = async () => {
 
   if (existingAdmin) {
     await supabaseAdmin.auth.admin.updateUserById(existingAdmin.id, {
+      password: ADMIN_PASSWORD,
       app_metadata: {
         ...(existingAdmin.app_metadata || {}),
         role: 'ADMIN'
