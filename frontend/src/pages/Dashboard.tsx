@@ -96,7 +96,7 @@ type ManagedUser = {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'CLIENT';
+  role: 'ADMIN' | 'DEV' | 'CLIENT';
   company_id?: string | null;
   companyId?: string | null;
   access_until?: string | null;
@@ -746,7 +746,7 @@ const Dashboard = () => {
   const [userFormName, setUserFormName] = useState('');
   const [userFormEmail, setUserFormEmail] = useState('');
   const [userFormPassword, setUserFormPassword] = useState('');
-  const [userFormRole, setUserFormRole] = useState<'ADMIN' | 'CLIENT'>('CLIENT');
+  const [userFormRole, setUserFormRole] = useState<'ADMIN' | 'DEV' | 'CLIENT'>('CLIENT');
   const [userFormCompanyId, setUserFormCompanyId] = useState('');
   const [userFormCompanyName, setUserFormCompanyName] = useState('');
   const [userFormAccessUntil, setUserFormAccessUntil] = useState('');
@@ -3087,8 +3087,8 @@ const Dashboard = () => {
       return;
     }
 
-    if (userFormRole === 'CLIENT' && !userFormCompanyId.trim() && !userFormCompanyName.trim()) {
-      setStatus('CLIENT precisa de uma empresa existente ou novo nome de empresa.');
+    if ((userFormRole === 'CLIENT' || userFormRole === 'DEV') && !userFormCompanyId.trim() && !userFormCompanyName.trim()) {
+      setStatus(`${userFormRole} precisa de uma empresa existente ou novo nome de empresa.`);
       return;
     }
 
@@ -3107,8 +3107,8 @@ const Dashboard = () => {
           password: userFormPassword,
           role: userFormRole,
           companyId: userFormRole === 'ADMIN' ? null : userFormCompanyId.trim() || null,
-          companyName: userFormRole === 'CLIENT' ? userFormCompanyName.trim() || null : null,
-          accessUntil: userFormRole === 'CLIENT' && userFormAccessUntil ? new Date(userFormAccessUntil).toISOString() : null
+          companyName: (userFormRole === 'CLIENT' || userFormRole === 'DEV') ? userFormCompanyName.trim() || null : null,
+          accessUntil: (userFormRole === 'CLIENT' || userFormRole === 'DEV') && userFormAccessUntil ? new Date(userFormAccessUntil).toISOString() : null
         })
       });
       const result = await response.json();
@@ -5276,8 +5276,9 @@ const Dashboard = () => {
                   <input className={themedInputClass} placeholder="Nome" value={userFormName} onChange={(event) => setUserFormName(event.target.value)} />
                   <input className={themedInputClass} placeholder="Email" value={userFormEmail} onChange={(event) => setUserFormEmail(event.target.value)} />
                   <input className={themedInputClass} placeholder="Senha" type="password" value={userFormPassword} onChange={(event) => setUserFormPassword(event.target.value)} />
-                  <select className={themedSelectClass} value={userFormRole} onChange={(event) => setUserFormRole(event.target.value as 'ADMIN' | 'CLIENT')}>
+                  <select className={themedSelectClass} value={userFormRole} onChange={(event) => setUserFormRole(event.target.value as 'ADMIN' | 'DEV' | 'CLIENT')}>
                     <option className={themedOptionClass} value="CLIENT">CLIENT</option>
+                    <option className={themedOptionClass} value="DEV">DEV</option>
                     <option className={themedOptionClass} value="ADMIN">ADMIN</option>
                   </select>
                   <select className={themedSelectClass} value={userFormCompanyId} onChange={(event) => setUserFormCompanyId(event.target.value)} disabled={userFormRole === 'ADMIN'}>
@@ -5286,7 +5287,7 @@ const Dashboard = () => {
                       <option className={themedOptionClass} key={option.id} value={option.id}>{option.name}</option>
                     ))}
                   </select>
-                  <input className={themedInputClass} placeholder="Ou criar nova empresa para o cliente" value={userFormCompanyName} onChange={(event) => setUserFormCompanyName(event.target.value)} disabled={userFormRole === 'ADMIN'} />
+                  <input className={themedInputClass} placeholder="Ou criar nova empresa para CLIENT/DEV" value={userFormCompanyName} onChange={(event) => setUserFormCompanyName(event.target.value)} disabled={userFormRole === 'ADMIN'} />
                   <input className={themedInputClass} type="date" value={userFormAccessUntil} onChange={(event) => setUserFormAccessUntil(event.target.value)} disabled={userFormRole === 'ADMIN'} />
                 </div>
                 <button type="button" onClick={handleCreateUser} className="mt-4 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-70" disabled={adminLoading}>

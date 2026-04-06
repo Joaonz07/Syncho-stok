@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { isAdmin, requireAuth } from '../middleware/authMiddleware';
 import { getGlobalData } from '../services/dataAccess';
 import { supabaseAdmin } from '../supabaseClient';
+import type { UserRole } from '../types/auth';
 import {
   createCompanyForSignup,
   ensureUserHasCompany,
@@ -113,7 +114,7 @@ const updateUserPublicProfile = async (params: {
   userId: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'CLIENT';
+  role: UserRole;
   companyId: string | null;
   accessUntil?: string | null;
 }) => {
@@ -420,7 +421,7 @@ router.post('/users', async (req, res) => {
     return res.status(400).json({ message: 'name, email e password sao obrigatorios.' });
   }
 
-  if (role === 'CLIENT' && !companyId && companyName) {
+  if ((role === 'CLIENT' || role === 'DEV') && !companyId && companyName) {
     const companyCreated = await createCompanyForSignup({
       name: companyName,
       plan: 'BASIC'
@@ -433,11 +434,11 @@ router.post('/users', async (req, res) => {
     companyId = String((companyCreated.data as Record<string, unknown>).id || '').trim() || null;
   }
 
-  if (role === 'CLIENT' && !companyId) {
-    return res.status(400).json({ message: 'CLIENT precisa de companyId ou companyName.' });
+  if ((role === 'CLIENT' || role === 'DEV') && !companyId) {
+    return res.status(400).json({ message: `${role} precisa de companyId ou companyName.` });
   }
 
-  if (role === 'CLIENT' && !accessUntil && companyId) {
+  if ((role === 'CLIENT' || role === 'DEV') && !accessUntil && companyId) {
     accessUntil = await getCompanyAccessUntilFallback(companyId);
   }
 
@@ -531,7 +532,7 @@ router.patch('/users/:userId', async (req, res) => {
       ? String(currentUser.company_id || currentUser.companyId || currentUser.companyID || '').trim() || null
       : String(companyIdRaw || '').trim() || null;
 
-  if (nextRole === 'CLIENT' && !nextCompanyId && companyName) {
+  if ((nextRole === 'CLIENT' || nextRole === 'DEV') && !nextCompanyId && companyName) {
     const companyCreated = await createCompanyForSignup({
       name: companyName,
       plan: 'BASIC'
@@ -544,11 +545,11 @@ router.patch('/users/:userId', async (req, res) => {
     nextCompanyId = String((companyCreated.data as Record<string, unknown>).id || '').trim() || null;
   }
 
-  if (nextRole === 'CLIENT' && !nextCompanyId) {
-    return res.status(400).json({ message: 'CLIENT precisa de companyId ou companyName.' });
+  if ((nextRole === 'CLIENT' || nextRole === 'DEV') && !nextCompanyId) {
+    return res.status(400).json({ message: `${nextRole} precisa de companyId ou companyName.` });
   }
 
-  if (nextRole === 'CLIENT' && accessUntil === undefined && nextCompanyId) {
+  if ((nextRole === 'CLIENT' || nextRole === 'DEV') && accessUntil === undefined && nextCompanyId) {
     accessUntil = await getCompanyAccessUntilFallback(nextCompanyId);
   }
 
