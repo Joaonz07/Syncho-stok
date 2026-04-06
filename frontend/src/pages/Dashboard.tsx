@@ -6512,7 +6512,7 @@ const Dashboard = () => {
             </motion.div>
           ) : null}
 
-          {activeView === 'sales' || activeView === 'pipeline' ? (
+          {activeView === 'sales' ? (
             <div className="grid gap-6">
               <div className={[
                 'rounded-2xl p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg',
@@ -7260,18 +7260,24 @@ const Dashboard = () => {
                 initial={{ opacity: 0, y: -16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="flex flex-col gap-1"
+                className="flex flex-col gap-2"
               >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/30">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/30">
                     <Activity className="h-5 w-5 text-white" />
                   </div>
-                  <div>
-                    <h1 className={['text-2xl font-black tracking-tight', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>
+                  <div className="space-y-1">
+                    <p className={[
+                      'text-base font-bold leading-tight md:text-lg',
+                      isDarkTheme ? 'text-slate-100' : 'text-slate-900'
+                    ].join(' ')}>
+                      Bem-vindo de volta, {displayUserName || 'Usuario'}
+                    </p>
+                    <h1 className={['text-2xl font-black tracking-tight md:text-3xl', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>
                       Dashboard de Análise
                     </h1>
-                    <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                      Bem-vindo de volta, {displayUserName || 'Usuario'}. Acompanhe o desempenho do seu negocio em tempo real.
+                    <p className={['text-sm md:text-base', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>
+                      Acompanhe o desempenho do seu negocio em tempo real.
                     </p>
                   </div>
                 </div>
