@@ -26,10 +26,6 @@ import {
   Sparkles,
   Activity,
   ArrowUpRight,
-  ArrowDownRight,
-  Lightbulb,
-  AlertTriangle,
-  Award,
   Copy,
   KeyRound,
   RefreshCw,
@@ -1689,52 +1685,7 @@ const Dashboard = () => {
     [funnelSellersAnalytics]
   );
 
-  const analyticsTopProducts = useMemo(() => {
-    const map: Record<string, { name: string; revenue: number; qty: number }> = {};
-    for (const sale of salesAnalysis?.recentSales || []) {
-      const key = String(sale.userId || 'other');
-      if (!map[key]) map[key] = { name: key.slice(0, 12), revenue: 0, qty: 0 };
-      map[key].revenue += Number(sale.total || 0);
-      map[key].qty += 1;
-    }
-    const productMap: Record<string, { name: string; revenue: number }> = {};
-    for (const p of products) {
-      const rev = Number(p.price || 0) * Number(p.quantity || 0);
-      productMap[p.id] = { name: String(p.name || '').slice(0, 16), revenue: rev };
-    }
-    return Object.values(productMap)
-      .filter((p) => p.revenue > 0)
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 6)
-      .map((p) => ({ name: p.name, valor: p.revenue }));
-  }, [salesAnalysis, products]);
 
-  const aiInsights = useMemo(() => {
-    const insights: Array<{ icon: 'up' | 'warn' | 'award'; text: string }> = [];
-    if (growthPercent > 0) {
-      insights.push({ icon: 'up', text: `Vendas cresceram ${growthPercent.toFixed(1)}% em relação ao mês anterior.` });
-    } else if (growthPercent < 0) {
-      insights.push({ icon: 'warn', text: `Queda de ${Math.abs(growthPercent).toFixed(1)}% nas vendas. Revise sua estratégia.` });
-    }
-    const lowStock = (salesAnalysis?.lowStockProducts || []).filter((p) => Number(p.quantity) <= 5);
-    for (const p of lowStock.slice(0, 2)) {
-      insights.push({ icon: 'warn', text: `Estoque crítico: "${p.name}" com apenas ${p.quantity} unidades.` });
-    }
-    if (sellerPerformanceData.length > 0) {
-      const top = sellerPerformanceData[0];
-      insights.push({ icon: 'award', text: `Melhor vendedor atual: ${top.name} com ${formatCurrency(Number(top.valor || 0))} em vendas.` });
-    }
-    if (products.length > 0) {
-      const topProduct = [...products].sort((a, b) => Number(b.price || 0) * Number(b.quantity || 0) - Number(a.price || 0) * Number(a.quantity || 0))[0];
-      if (topProduct) {
-        insights.push({ icon: 'up', text: `Produto em destaque: "${topProduct.name}" com maior valor em estoque.` });
-      }
-    }
-    if (insights.length === 0) {
-      insights.push({ icon: 'up', text: 'Adicione vendas e estoque para receber análises personalizadas.' });
-    }
-    return insights.slice(0, 4);
-  }, [growthPercent, salesAnalysis, sellerPerformanceData, products]);
 
   const adminPlanPriceMap = useMemo(() => {
     return planCatalog.reduce<Record<string, number>>((acc, plan) => {
