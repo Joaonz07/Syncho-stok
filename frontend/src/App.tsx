@@ -9,8 +9,8 @@ const PlansPage = lazy(() => import('./pages/PlansPage'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 
 const RouteLoader = () => (
-  <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 grid place-items-center p-6 text-slate-100">
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-5 py-4 text-sm text-slate-300">
+  <main className="saas-page grid place-items-center p-6 text-slate-100">
+    <div className="saas-shell max-w-sm px-5 py-4 text-sm text-slate-300">
       Carregando pagina...
     </div>
   </main>
@@ -21,8 +21,8 @@ function RootRedirect() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 grid place-items-center p-6 text-slate-100">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-5 py-4 text-sm text-slate-300">
+      <main className="saas-page grid place-items-center p-6 text-slate-100">
+        <div className="saas-shell max-w-sm px-5 py-4 text-sm text-slate-300">
           Carregando CRM...
         </div>
       </main>
