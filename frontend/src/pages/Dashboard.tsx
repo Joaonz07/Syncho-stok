@@ -899,6 +899,17 @@ const Dashboard = () => {
   const supportTypingTimeoutRef = useRef<number | null>(null);
   const selectedSupportRequestIdRef = useRef<string | null>(null);
   const activeViewRef = useRef<DashboardView>('pipeline');
+  const viewDataCacheRef = useRef<{
+    leadsKey: string;
+    productsKey: string;
+    inventoryKey: string;
+    salesAnalysisKey: string;
+  }>({
+    leadsKey: '',
+    productsKey: '',
+    inventoryKey: '',
+    salesAnalysisKey: ''
+  });
 
   const playSupportNotificationTone = () => {
     if (typeof window === 'undefined') {
@@ -2760,8 +2771,19 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
+    if (activeView !== 'pipeline' && activeView !== 'analytics') {
+      return;
+    }
+
+    const cacheKey = `${role}:${String(companyId || '').trim()}`;
+
+    if (viewDataCacheRef.current.leadsKey === cacheKey && leads.length > 0) {
+      return;
+    }
+
+    viewDataCacheRef.current.leadsKey = cacheKey;
     void fetchLeads();
-  }, [token, companyId]);
+  }, [activeView, token, companyId, role, leads.length]);
 
   useEffect(() => {
     if (role === 'ADMIN') {
@@ -2771,14 +2793,47 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (activeView === 'products') {
+      const targetCompanyId = getTargetCompanyId(productCompanyId);
+      const cacheKey = `products:${targetCompanyId || 'none'}`;
+
+      if (viewDataCacheRef.current.productsKey === cacheKey && products.length > 0) {
+        return;
+      }
+
+      viewDataCacheRef.current.productsKey = cacheKey;
       void fetchProducts();
     }
 
     if (activeView === 'inventory') {
-      void fetchInventory();
+      const targetCompanyId = getTargetCompanyId(productCompanyId);
+      const inventoryKey = `inventory:${targetCompanyId || 'none'}`;
+      const productsKey = `products:${targetCompanyId || 'none'}`;
+
+      if (viewDataCacheRef.current.inventoryKey !== inventoryKey || inventoryItems.length === 0) {
+        viewDataCacheRef.current.inventoryKey = inventoryKey;
+        void fetchInventory();
+      }
+
+      if (viewDataCacheRef.current.productsKey !== productsKey || products.length === 0) {
+        viewDataCacheRef.current.productsKey = productsKey;
+        void fetchProducts();
+      }
+
+      return;
+    }
+
+    if (activeView === 'sales') {
+      const targetCompanyId = getTargetCompanyId(productCompanyId);
+      const productsKey = `products:${targetCompanyId || 'none'}`;
+
+      if (viewDataCacheRef.current.productsKey === productsKey && products.length > 0) {
+        return;
+      }
+
+      viewDataCacheRef.current.productsKey = productsKey;
       void fetchProducts();
     }
-  }, [activeView, token, productCompanyId]);
+  }, [activeView, productCompanyId, products.length, inventoryItems.length]);
 
   useEffect(() => {
     if (activeView === 'settings') {
@@ -2959,15 +3014,36 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (activeView === 'sales') {
-      void fetchProducts();
-      void fetchSalesAnalysis();
+      const targetCompanyId = getTargetCompanyId(salesCompanyId);
+      const salesKey = `sales:${targetCompanyId || 'none'}`;
+
+      if (viewDataCacheRef.current.salesAnalysisKey !== salesKey || !salesAnalysis) {
+        viewDataCacheRef.current.salesAnalysisKey = salesKey;
+        void fetchSalesAnalysis();
+      }
+
       return;
     }
 
     if (activeView === 'pipeline') {
-      void fetchSalesAnalysis({ silent: true });
+      const targetCompanyId = getTargetCompanyId(salesCompanyId);
+      const salesKey = `sales:${targetCompanyId || 'none'}`;
+
+      if (viewDataCacheRef.current.salesAnalysisKey !== salesKey || !salesAnalysis) {
+        viewDataCacheRef.current.salesAnalysisKey = salesKey;
+        void fetchSalesAnalysis({ silent: true });
+      }
     }
-  }, [activeView, token, salesCompanyId]);
+  }, [activeView, token, salesCompanyId, salesAnalysis]);
+
+  useEffect(() => {
+    viewDataCacheRef.current = {
+      leadsKey: '',
+      productsKey: '',
+      inventoryKey: '',
+      salesAnalysisKey: ''
+    };
+  }, [token]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
