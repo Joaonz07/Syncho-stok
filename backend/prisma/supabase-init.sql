@@ -55,6 +55,10 @@ create table if not exists sales (
   company_id uuid not null references companies(id) on delete cascade,
   user_id uuid not null references users(id) on delete cascade,
   total numeric(10, 2) not null,
+  payment_method text null,
+  amount_received numeric(10, 2) null,
+  change_due numeric(10, 2) null,
+  customer_name text null,
   created_at timestamptz not null default now()
 );
 

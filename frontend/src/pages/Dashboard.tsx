@@ -38,7 +38,8 @@ import {
   Code2,
   Plus,
   Trash2,
-  Lock
+  Lock,
+  Download
 } from 'lucide-react';
 import {
   LineChart,
@@ -154,7 +155,18 @@ type SalesAnalysis = {
     id: string;
     total: number;
     userId: string | null;
+    customerName?: string | null;
+    paymentMethod?: 'cash' | 'pix' | 'card' | string | null;
+    amountReceived?: number;
+    changeDue?: number;
     createdAt: string;
+  }>;
+  paymentSummaryToday?: Array<{
+    method: 'cash' | 'pix' | 'card';
+    salesCount: number;
+    total: number;
+    amountReceived: number;
+    changeGiven: number;
   }>;
   lowStockProducts: Array<{
     id: string;
@@ -252,6 +264,60 @@ const columns: Array<{ key: LeadStatus; label: string }> = [
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
+
+const escapeCsvValue = (value: unknown) => {
+  const text = String(value ?? '');
+
+  if (/[";,\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+};
+
+const formatSalePaymentMethod = (method?: string | null) => {
+  switch (String(method || '').toLowerCase()) {
+    case 'cash':
+      return 'Dinheiro';
+    case 'pix':
+      return 'Pix';
+    case 'card':
+      return 'Cartao';
+    default:
+      return 'Nao informado';
+  }
+};
+
+const normalizeMoneyInput = (rawValue: string) => {
+  const normalized = String(rawValue || '')
+    .replace(',', '.')
+    .replace(/[^\d.]/g, '');
+
+  if (!normalized) {
+    return '';
+  }
+
+  const [intPartRaw, ...decimalParts] = normalized.split('.');
+  const intPart = intPartRaw.replace(/^0+(?=\d)/, '') || '0';
+
+  if (!decimalParts.length) {
+    return intPart;
+  }
+
+  const decimalPart = decimalParts.join('').slice(0, 2);
+  return `${intPart}.${decimalPart}`;
+};
+
+const parseMoneyInput = (rawValue: string) => {
+  const normalized = normalizeMoneyInput(rawValue);
+
+  if (!normalized) {
+    return 0;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
 
 const formatDateTime = (value: string) => {
   const date = new Date(String(value || ''));
@@ -866,8 +932,10 @@ const Dashboard = () => {
   const [saleLines, setSaleLines] = useState<SaleLine[]>([{ id: 1, productId: '', quantity: 1 }]);
   const [saleCustomerId, setSaleCustomerId] = useState('quick-sale');
   const [salePaymentMethod, setSalePaymentMethod] = useState<'cash' | 'pix' | 'card'>('pix');
+  const [saleAmountReceivedInput, setSaleAmountReceivedInput] = useState('');
   const [saleHistorySearch, setSaleHistorySearch] = useState('');
   const [saleHistoryStatusFilter, setSaleHistoryStatusFilter] = useState<'ALL' | 'CONCLUIDA'>('ALL');
+  const [saleHistoryPaymentFilter, setSaleHistoryPaymentFilter] = useState<'ALL' | 'cash' | 'pix' | 'card'>('ALL');
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesAnalysis, setSalesAnalysis] = useState<SalesAnalysis | null>(null);
   const [salesChartMetric, setSalesChartMetric] = useState<'quantity' | 'price'>('quantity');
@@ -1377,6 +1445,32 @@ const Dashboard = () => {
     [salesCartItems]
   );
 
+  const saleAmountReceived = useMemo(() => {
+    if (salePaymentMethod !== 'cash') {
+      return salesCartTotal;
+    }
+
+    return parseMoneyInput(saleAmountReceivedInput);
+  }, [saleAmountReceivedInput, salePaymentMethod, salesCartTotal]);
+
+  const saleChangeDue = useMemo(() => {
+    if (salePaymentMethod !== 'cash') {
+      return 0;
+    }
+
+    const change = saleAmountReceived - salesCartTotal;
+    return change > 0 ? change : 0;
+  }, [saleAmountReceived, salePaymentMethod, salesCartTotal]);
+
+  const saleMissingAmount = useMemo(() => {
+    if (salePaymentMethod !== 'cash') {
+      return 0;
+    }
+
+    const missing = salesCartTotal - saleAmountReceived;
+    return missing > 0 ? missing : 0;
+  }, [saleAmountReceived, salePaymentMethod, salesCartTotal]);
+
   const salesTodayTotal = useMemo(() => {
     const todayKey = new Date().toDateString();
 
@@ -1423,8 +1517,12 @@ const Dashboard = () => {
   const salesHistoryRows = useMemo(() => {
     return (salesAnalysis?.recentSales || []).map((sale) => ({
       id: String(sale.id || ''),
-      customer: 'Venda rapida',
+      customer: String(sale.customerName || '').trim() || 'Venda rapida',
       total: Number(sale.total || 0),
+      paymentMethodKey: String(sale.paymentMethod || '').trim().toLowerCase() || 'pix',
+      paymentMethod: formatSalePaymentMethod(sale.paymentMethod),
+      amountReceived: Number(sale.amountReceived || 0),
+      changeDue: Number(sale.changeDue || 0),
       createdAt: String(sale.createdAt || ''),
       status: 'CONCLUIDA' as const
     }));
@@ -1438,6 +1536,10 @@ const Dashboard = () => {
         return false;
       }
 
+      if (saleHistoryPaymentFilter !== 'ALL' && row.paymentMethodKey !== saleHistoryPaymentFilter) {
+        return false;
+      }
+
       if (!search) {
         return true;
       }
@@ -1445,10 +1547,91 @@ const Dashboard = () => {
       return (
         row.customer.toLowerCase().includes(search)
         || row.id.toLowerCase().includes(search)
+        || row.paymentMethod.toLowerCase().includes(search)
         || formatCurrency(row.total).toLowerCase().includes(search)
       );
     });
-  }, [saleHistorySearch, saleHistoryStatusFilter, salesHistoryRows]);
+  }, [saleHistoryPaymentFilter, saleHistorySearch, saleHistoryStatusFilter, salesHistoryRows]);
+
+  const salesTodayByPayment = useMemo(() => {
+    const rows = salesAnalysis?.paymentSummaryToday || [];
+    const map = new Map(rows.map((entry) => [entry.method, entry]));
+
+    return (['cash', 'pix', 'card'] as const).map((method) => {
+      const entry = map.get(method);
+      return {
+        method,
+        label: formatSalePaymentMethod(method),
+        salesCount: Number(entry?.salesCount || 0),
+        total: Number(entry?.total || 0),
+        amountReceived: Number(entry?.amountReceived || 0),
+        changeGiven: Number(entry?.changeGiven || 0)
+      };
+    });
+  }, [salesAnalysis]);
+
+  const downloadCsvFile = (filename: string, rows: string[][]) => {
+    const csvContent = rows.map((row) => row.map((cell) => escapeCsvValue(cell)).join(';')).join('\n');
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSalesHistoryCsv = () => {
+    if (!filteredSalesHistoryRows.length) {
+      setStatus('Nao ha vendas para exportar com os filtros atuais.');
+      return;
+    }
+
+    const dateTag = new Date().toISOString().slice(0, 10);
+    const rows = [
+      ['id', 'cliente', 'total', 'pagamento', 'recebido', 'troco', 'status', 'data'],
+      ...filteredSalesHistoryRows.map((sale) => [
+        sale.id,
+        sale.customer,
+        Number(sale.total || 0).toFixed(2),
+        sale.paymentMethod,
+        Number(sale.amountReceived || 0).toFixed(2),
+        Number(sale.changeDue || 0).toFixed(2),
+        sale.status,
+        sale.createdAt
+      ])
+    ];
+
+    downloadCsvFile(`historico-vendas-${dateTag}.csv`, rows);
+    setStatus('Historico de vendas exportado com sucesso.');
+    showToast('CSV do historico gerado');
+  };
+
+  const exportDailyClosingCsv = () => {
+    if (!salesTodayByPayment.length) {
+      setStatus('Nao ha dados de fechamento para exportar.');
+      return;
+    }
+
+    const dateTag = new Date().toISOString().slice(0, 10);
+    const rows = [
+      ['metodo', 'vendas', 'total', 'recebido', 'troco'],
+      ...salesTodayByPayment.map((entry) => [
+        entry.label,
+        String(entry.salesCount),
+        Number(entry.total || 0).toFixed(2),
+        Number(entry.amountReceived || 0).toFixed(2),
+        Number(entry.changeGiven || 0).toFixed(2)
+      ])
+    ];
+
+    downloadCsvFile(`fechamento-diario-${dateTag}.csv`, rows);
+    setStatus('Fechamento diario exportado com sucesso.');
+    showToast('CSV do fechamento gerado');
+  };
 
   const summaryCards = useMemo(
     () => [
@@ -3593,6 +3776,11 @@ const Dashboard = () => {
       return;
     }
 
+    if (salePaymentMethod === 'cash' && saleMissingAmount > 0) {
+      setStatus(`Valor recebido insuficiente. Falta ${formatCurrency(saleMissingAmount)}.`);
+      return;
+    }
+
     setSalesLoading(true);
 
     try {
@@ -3606,7 +3794,9 @@ const Dashboard = () => {
           companyId: targetCompanyId,
           items,
           paymentMethod: salePaymentMethod,
-          customerName: selectedSalesCustomerName
+          customerName: selectedSalesCustomerName,
+          amountReceived: Number(saleAmountReceived.toFixed(2)),
+          changeDue: Number(saleChangeDue.toFixed(2))
         })
       });
       const result = await response.json();
@@ -3619,6 +3809,7 @@ const Dashboard = () => {
       setSaleLines([{ id: Date.now(), productId: '', quantity: 1 }]);
       setSaleCustomerId('quick-sale');
       setSalePaymentMethod('pix');
+      setSaleAmountReceivedInput('');
       setStatus('Venda finalizada com sucesso e estoque atualizado.');
       showToast('Venda concluida');
       await fetchProducts();
@@ -6534,6 +6725,37 @@ const Dashboard = () => {
                         ))}
                       </div>
 
+                      {salePaymentMethod === 'cash' ? (
+                        <div className={['rounded-xl border px-3 py-3', isDarkTheme ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white'].join(' ')}>
+                          <label className={['text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')} htmlFor="sale-amount-received">
+                            Valor recebido
+                          </label>
+                          <input
+                            id="sale-amount-received"
+                            value={saleAmountReceivedInput}
+                            onChange={(event) => setSaleAmountReceivedInput(normalizeMoneyInput(event.target.value))}
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            className={[
+                              'mt-2 w-full rounded-xl px-3 py-2 text-sm outline-none',
+                              isDarkTheme
+                                ? 'border border-white/10 bg-white/5 text-slate-100 placeholder-slate-500'
+                                : 'border border-slate-200 bg-white text-slate-700 placeholder-slate-400'
+                            ].join(' ')}
+                          />
+                          <div className="mt-2 grid gap-1 text-xs">
+                            <p className={isDarkTheme ? 'text-cyan-200/90' : 'text-cyan-700'}>
+                              Troco: {formatCurrency(saleChangeDue)}
+                            </p>
+                            {saleMissingAmount > 0 ? (
+                              <p className={isDarkTheme ? 'text-rose-300' : 'text-rose-600'}>
+                                Falta: {formatCurrency(saleMissingAmount)}
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+
                       <button
                         type="button"
                         onClick={checkoutSale}
@@ -6553,7 +6775,7 @@ const Dashboard = () => {
                       <input
                         value={saleHistorySearch}
                         onChange={(event) => setSaleHistorySearch(event.target.value)}
-                        placeholder="Buscar cliente, ID ou valor"
+                        placeholder="Buscar cliente, ID, pagamento ou valor"
                         className={[
                           'rounded-xl px-3 py-2 text-sm outline-none',
                           isDarkTheme
@@ -6574,6 +6796,21 @@ const Dashboard = () => {
                         <option value="ALL">Todos os status</option>
                         <option value="CONCLUIDA">Concluída</option>
                       </select>
+                      <select
+                        value={saleHistoryPaymentFilter}
+                        onChange={(event) => setSaleHistoryPaymentFilter(event.target.value as 'ALL' | 'cash' | 'pix' | 'card')}
+                        className={[
+                          'rounded-xl px-3 py-2 text-sm outline-none',
+                          isDarkTheme
+                            ? 'border border-white/10 bg-white/5 text-slate-100'
+                            : 'border border-slate-200 bg-white text-slate-700'
+                        ].join(' ')}
+                      >
+                        <option value="ALL">Todos os pagamentos</option>
+                        <option value="cash">Dinheiro</option>
+                        <option value="pix">Pix</option>
+                        <option value="card">Cartão</option>
+                      </select>
                       <button
                         type="button"
                         onClick={() => void fetchSalesAnalysis()}
@@ -6581,6 +6818,14 @@ const Dashboard = () => {
                         className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60' : 'rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60'}
                       >
                         Atualizar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={exportSalesHistoryCsv}
+                        className={isDarkTheme ? 'inline-flex items-center gap-1 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20' : 'inline-flex items-center gap-1 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700 hover:bg-cyan-100'}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Exportar historico
                       </button>
                     </div>
                   </div>
@@ -6591,6 +6836,7 @@ const Dashboard = () => {
                         <tr className={isDarkTheme ? 'text-slate-300' : 'text-slate-600'}>
                           <th className="px-3 py-2 text-left">Cliente</th>
                           <th className="px-3 py-2 text-left">Valor total</th>
+                          <th className="px-3 py-2 text-left">Pagamento</th>
                           <th className="px-3 py-2 text-left">Data</th>
                           <th className="px-3 py-2 text-left">Status</th>
                         </tr>
@@ -6600,6 +6846,21 @@ const Dashboard = () => {
                           <tr key={sale.id} className={isDarkTheme ? 'border-t border-white/10' : 'border-t border-slate-200'}>
                             <td className="px-3 py-3">{sale.customer}</td>
                             <td className="px-3 py-3 font-semibold">{formatCurrency(sale.total)}</td>
+                            <td className="px-3 py-3">
+                              <div className="flex flex-col gap-0.5">
+                                <span>{sale.paymentMethod}</span>
+                                {sale.amountReceived > 0 ? (
+                                  <span className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                                    Recebido: {formatCurrency(sale.amountReceived)}
+                                  </span>
+                                ) : null}
+                                {sale.changeDue > 0 ? (
+                                  <span className={['text-xs font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-cyan-700'].join(' ')}>
+                                    Troco: {formatCurrency(sale.changeDue)}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </td>
                             <td className="px-3 py-3">{formatDateTime(sale.createdAt)}</td>
                             <td className="px-3 py-3">
                               <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-300">{sale.status}</span>
@@ -6645,6 +6906,47 @@ const Dashboard = () => {
                   <div className={['rounded-xl p-3 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5 hover:bg-white/10' : 'border border-slate-200 bg-slate-50'].join(' ')}>
                     <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Produtos cadastrados</p>
                     <p className={['mt-1 text-lg font-bold', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{Number(salesAnalysis?.productsCount || 0)}</p>
+                  </div>
+                </div>
+
+                <div className={['mt-4 rounded-xl p-4 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Fechamento diário por pagamento</h3>
+                    <button
+                      type="button"
+                      onClick={exportDailyClosingCsv}
+                      className={isDarkTheme ? 'inline-flex items-center gap-1 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20' : 'inline-flex items-center gap-1 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-100'}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Exportar fechamento
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-3">
+                    {salesTodayByPayment.map((entry) => (
+                      <div
+                        key={entry.method}
+                        className={[
+                          'rounded-lg border px-3 py-2 text-sm',
+                          isDarkTheme
+                            ? 'border-white/10 bg-slate-900/70 text-slate-100'
+                            : 'border-slate-200 bg-white text-slate-700'
+                        ].join(' ')}
+                      >
+                        <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{entry.label}</p>
+                        <p className="mt-1 font-semibold">{entry.salesCount} venda(s)</p>
+                        <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                          Total: {formatCurrency(entry.total)}
+                        </p>
+                        <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                          Recebido: {formatCurrency(entry.amountReceived)}
+                        </p>
+                        {entry.changeGiven > 0 ? (
+                          <p className={['text-xs font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-cyan-700'].join(' ')}>
+                            Troco: {formatCurrency(entry.changeGiven)}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
                   </div>
                 </div>
 

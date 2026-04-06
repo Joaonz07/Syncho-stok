@@ -80,6 +80,10 @@ model Sale {
   companyId String
   userId    String
   total     Decimal  @db.Decimal(10, 2)
+  paymentMethod String?
+  amountReceived Decimal? @db.Decimal(10, 2)
+  changeDue Decimal? @db.Decimal(10, 2)
+  customerName String?
   createdAt DateTime @default(now())
 
   company Company    @relation(fields: [companyId], references: [id])

@@ -44,6 +44,10 @@ const tableAliases = {
 
 const companyFieldAliases = ['company_id', 'companyId', 'companyID'];
 const productFieldAliases = ['product_id', 'productId'];
+const salePaymentFieldAliases = ['payment_method', 'paymentMethod'];
+const saleAmountReceivedFieldAliases = ['amount_received', 'amountReceived'];
+const saleChangeDueFieldAliases = ['change_due', 'changeDue'];
+const saleCustomerNameFieldAliases = ['customer_name', 'customerName'];
 const leadStatuses = [
   'NOVO_CONTATO',
   'EM_CONTATO',
@@ -91,6 +95,9 @@ type CheckoutItem = {
   productId: string;
   quantity: number;
 };
+
+const checkoutPaymentMethods = ['cash', 'pix', 'card'] as const;
+type CheckoutPaymentMethod = (typeof checkoutPaymentMethods)[number];
 
 const getSupportMessagesWithAliases = async (companyId: string, requestId?: string | null) => {
   for (const tableName of tableAliases.messages) {
@@ -1645,9 +1652,20 @@ router.post('/sales/checkout', requireAuth, async (req, res) => {
       (item: { productId: string; quantity: number }) =>
         item.productId && Number.isFinite(item.quantity) && item.quantity > 0
     ) as CheckoutItem[];
+  const rawPaymentMethod = String(req.body?.paymentMethod || 'pix').trim().toLowerCase();
+  const paymentMethod = checkoutPaymentMethods.includes(rawPaymentMethod as CheckoutPaymentMethod)
+    ? (rawPaymentMethod as CheckoutPaymentMethod)
+    : null;
+  const amountReceivedRaw = Number(req.body?.amountReceived ?? 0);
+  const amountReceived = Number.isFinite(amountReceivedRaw) ? amountReceivedRaw : 0;
+  const customerName = String(req.body?.customerName || '').trim() || null;
 
   if (!companyId) {
     return res.status(400).json({ message: 'companyId e obrigatorio para finalizar venda.' });
+  }
+
+  if (!paymentMethod) {
+    return res.status(400).json({ message: 'Forma de pagamento invalida.' });
   }
 
   if (!items.length) {
@@ -1723,26 +1741,76 @@ router.post('/sales/checkout', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'Total invalido para a venda.' });
   }
 
+  const roundedTotal = Number(total.toFixed(2));
+  const roundedAmountReceived = Number(amountReceived.toFixed(2));
+  const computedChangeDue = paymentMethod === 'cash'
+    ? Number((roundedAmountReceived - roundedTotal).toFixed(2))
+    : 0;
+
+  if (paymentMethod === 'cash') {
+    if (!Number.isFinite(roundedAmountReceived) || roundedAmountReceived <= 0) {
+      return res.status(400).json({ message: 'Informe um valor recebido valido para pagamento em dinheiro.' });
+    }
+
+    if (computedChangeDue < 0) {
+      return res.status(400).json({ message: 'Valor recebido insuficiente para concluir a venda em dinheiro.' });
+    }
+  }
+
   let saleRecord: Record<string, unknown> | null = null;
   let saleError: string | null = null;
 
   for (const companyField of companyFieldAliases) {
     for (const userField of ['user_id', 'userId']) {
-      const payload = {
-        total,
+      const basePayload = {
+        total: roundedTotal,
         [companyField]: companyId,
         [userField]: explicitUserId
       };
+      const amountForStore = paymentMethod === 'cash' ? roundedAmountReceived : roundedTotal;
+      const paymentPayloadCandidates: Array<Record<string, unknown>> = [];
 
-      const response = await insertWithAliases('sales', payload);
+      for (const paymentField of salePaymentFieldAliases) {
+        for (const amountField of saleAmountReceivedFieldAliases) {
+          for (const changeField of saleChangeDueFieldAliases) {
+            const payload = {
+              ...basePayload,
+              [paymentField]: paymentMethod,
+              [amountField]: amountForStore,
+              [changeField]: paymentMethod === 'cash' ? computedChangeDue : 0
+            };
 
-      if (!response.error && response.data) {
-        saleRecord = response.data as Record<string, unknown>;
-        saleError = null;
-        break;
+            if (customerName) {
+              for (const customerField of saleCustomerNameFieldAliases) {
+                paymentPayloadCandidates.push({
+                  ...payload,
+                  [customerField]: customerName
+                });
+              }
+            }
+
+            paymentPayloadCandidates.push(payload);
+          }
+        }
       }
 
-      saleError = response.error?.message || 'Falha ao registrar venda.';
+      paymentPayloadCandidates.push(basePayload);
+
+      for (const payload of paymentPayloadCandidates) {
+        const response = await insertWithAliases('sales', payload);
+
+        if (!response.error && response.data) {
+          saleRecord = response.data as Record<string, unknown>;
+          saleError = null;
+          break;
+        }
+
+        saleError = response.error?.message || 'Falha ao registrar venda.';
+      }
+
+      if (saleRecord) {
+        break;
+      }
     }
 
     if (saleRecord) {
@@ -1790,6 +1858,11 @@ router.post('/sales/checkout', requireAuth, async (req, res) => {
   void dispatchCompanyWebhookEvent(companyId, 'sale.created', {
     sale: saleRecord,
     total,
+    payment: {
+      method: paymentMethod,
+      amountReceived: paymentMethod === 'cash' ? roundedAmountReceived : roundedTotal,
+      changeDue: paymentMethod === 'cash' ? computedChangeDue : 0
+    },
     items: normalizedItems.map((item) => ({
       productId: item.productId,
       name: item.name,
@@ -1803,8 +1876,13 @@ router.post('/sales/checkout', requireAuth, async (req, res) => {
     message: 'Venda finalizada com sucesso e estoque atualizado.',
     sale: saleRecord,
     analysis: {
-      total,
+      total: roundedTotal,
       itemsSold: normalizedItems.reduce((sum, item) => sum + item.quantity, 0),
+      payment: {
+        method: paymentMethod,
+        amountReceived: paymentMethod === 'cash' ? roundedAmountReceived : roundedTotal,
+        changeDue: paymentMethod === 'cash' ? computedChangeDue : 0
+      },
       products: normalizedItems.map((item) => ({
         productId: item.productId,
         name: item.name,
@@ -1907,8 +1985,75 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
       id: String(sale.id || ''),
       total: Number(sale.total || 0),
       userId: String(sale.user_id || sale.userId || '').trim() || null,
+      customerName: String(sale.customer_name || sale.customerName || '').trim() || null,
+      paymentMethod: String(sale.payment_method || sale.paymentMethod || '').trim().toLowerCase() || null,
+      amountReceived: Number(sale.amount_received || sale.amountReceived || 0) || 0,
+      changeDue: Number(sale.change_due || sale.changeDue || 0) || 0,
       createdAt: String(sale.created_at || sale.createdAt || new Date().toISOString())
     }));
+
+  const todayKey = new Date().toDateString();
+  const paymentSummaryTodayMap = new Map<CheckoutPaymentMethod, {
+    method: CheckoutPaymentMethod;
+    salesCount: number;
+    total: number;
+    amountReceived: number;
+    changeGiven: number;
+  }>();
+
+  for (const method of checkoutPaymentMethods) {
+    paymentSummaryTodayMap.set(method, {
+      method,
+      salesCount: 0,
+      total: 0,
+      amountReceived: 0,
+      changeGiven: 0
+    });
+  }
+
+  for (const sale of sales) {
+    const createdAt = new Date(String(sale.created_at || sale.createdAt || ''));
+
+    if (Number.isNaN(createdAt.getTime()) || createdAt.toDateString() !== todayKey) {
+      continue;
+    }
+
+    const methodRaw = String(sale.payment_method || sale.paymentMethod || '').trim().toLowerCase();
+    if (!checkoutPaymentMethods.includes(methodRaw as CheckoutPaymentMethod)) {
+      continue;
+    }
+
+    const method = methodRaw as CheckoutPaymentMethod;
+    const summary = paymentSummaryTodayMap.get(method);
+
+    if (!summary) {
+      continue;
+    }
+
+    const total = Number(sale.total || 0);
+    const changeDue = Math.max(0, Number(sale.change_due || sale.changeDue || 0));
+    const amountReceivedRaw = Number(sale.amount_received || sale.amountReceived || 0);
+    const amountReceived = method === 'cash'
+      ? (Number.isFinite(amountReceivedRaw) && amountReceivedRaw > 0 ? amountReceivedRaw : total)
+      : total;
+
+    summary.salesCount += 1;
+    summary.total += Number.isFinite(total) ? total : 0;
+    summary.amountReceived += Number.isFinite(amountReceived) ? amountReceived : 0;
+    summary.changeGiven += Number.isFinite(changeDue) ? changeDue : 0;
+  }
+
+  const paymentSummaryToday = checkoutPaymentMethods.map((method) => {
+    const summary = paymentSummaryTodayMap.get(method);
+
+    return {
+      method,
+      salesCount: Number(summary?.salesCount || 0),
+      total: Number(Number(summary?.total || 0).toFixed(2)),
+      amountReceived: Number(Number(summary?.amountReceived || 0).toFixed(2)),
+      changeGiven: Number(Number(summary?.changeGiven || 0).toFixed(2))
+    };
+  });
 
   return res.status(200).json({
     companyId,
@@ -1919,6 +2064,7 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
     productsCount: products.length,
     lowStockProducts,
     recentSales,
+    paymentSummaryToday,
     errors: [salesResponse.error, productsResponse.error, inventoryResponse.error].filter(Boolean)
   });
 });
