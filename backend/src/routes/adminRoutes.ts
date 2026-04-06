@@ -421,7 +421,7 @@ router.post('/users', async (req, res) => {
     return res.status(400).json({ message: 'name, email e password sao obrigatorios.' });
   }
 
-  if ((role === 'CLIENT' || role === 'DEV') && !companyId && companyName) {
+  if (role === 'CLIENT' && !companyId && companyName) {
     const companyCreated = await createCompanyForSignup({
       name: companyName,
       plan: 'BASIC'
@@ -434,7 +434,7 @@ router.post('/users', async (req, res) => {
     companyId = String((companyCreated.data as Record<string, unknown>).id || '').trim() || null;
   }
 
-  if ((role === 'CLIENT' || role === 'DEV') && !companyId) {
+  if (role === 'CLIENT' && !companyId) {
     return res.status(400).json({ message: `${role} precisa de companyId ou companyName.` });
   }
 
@@ -532,7 +532,7 @@ router.patch('/users/:userId', async (req, res) => {
       ? String(currentUser.company_id || currentUser.companyId || currentUser.companyID || '').trim() || null
       : String(companyIdRaw || '').trim() || null;
 
-  if ((nextRole === 'CLIENT' || nextRole === 'DEV') && !nextCompanyId && companyName) {
+  if (nextRole === 'CLIENT' && !nextCompanyId && companyName) {
     const companyCreated = await createCompanyForSignup({
       name: companyName,
       plan: 'BASIC'
@@ -545,7 +545,7 @@ router.patch('/users/:userId', async (req, res) => {
     nextCompanyId = String((companyCreated.data as Record<string, unknown>).id || '').trim() || null;
   }
 
-  if ((nextRole === 'CLIENT' || nextRole === 'DEV') && !nextCompanyId) {
+  if (nextRole === 'CLIENT' && !nextCompanyId) {
     return res.status(400).json({ message: `${nextRole} precisa de companyId ou companyName.` });
   }
 

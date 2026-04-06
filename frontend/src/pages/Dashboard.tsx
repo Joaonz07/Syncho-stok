@@ -1764,6 +1764,26 @@ const Dashboard = () => {
     }
   };
 
+  const managedUsersSorted = useMemo(() => {
+    const roleWeight: Record<'ADMIN' | 'DEV' | 'CLIENT', number> = {
+      ADMIN: 0,
+      DEV: 1,
+      CLIENT: 2
+    };
+
+    return [...managedUsers].sort((left, right) => {
+      const leftRole = (left.role || 'CLIENT') as 'ADMIN' | 'DEV' | 'CLIENT';
+      const rightRole = (right.role || 'CLIENT') as 'ADMIN' | 'DEV' | 'CLIENT';
+      const byRole = roleWeight[leftRole] - roleWeight[rightRole];
+
+      if (byRole !== 0) {
+        return byRole;
+      }
+
+      return String(left.name || '').localeCompare(String(right.name || ''), 'pt-BR');
+    });
+  }, [managedUsers]);
+
   const openPlanEditor = (plan?: AdminPlanConfig) => {
     if (!plan) {
       setPlanEditorId(null);
@@ -3157,7 +3177,7 @@ const Dashboard = () => {
       return;
     }
 
-    if ((userFormRole === 'CLIENT' || userFormRole === 'DEV') && !userFormCompanyId.trim() && !userFormCompanyName.trim()) {
+    if (userFormRole === 'CLIENT' && !userFormCompanyId.trim() && !userFormCompanyName.trim()) {
       setStatus(`${userFormRole} precisa de uma empresa existente ou novo nome de empresa.`);
       return;
     }
@@ -3195,11 +3215,11 @@ const Dashboard = () => {
       setUserFormCompanyId('');
       setUserFormCompanyName('');
       setUserFormAccessUntil('');
-      setStatus('Cliente criado com sucesso.');
-      showToast('Cliente criado');
+      setStatus('Usuario criado com sucesso.');
+      showToast('Usuario criado');
       await fetchAdminData();
     } catch (_error) {
-      setStatus('Erro de rede ao criar cliente.');
+      setStatus('Erro de rede ao criar usuario.');
     } finally {
       setAdminLoading(false);
     }
@@ -3232,7 +3252,7 @@ const Dashboard = () => {
       return;
     }
 
-    if ((editingUserRole === 'CLIENT' || editingUserRole === 'DEV') && !editingUserCompanyId.trim() && !editingUserCompanyName.trim()) {
+    if (editingUserRole === 'CLIENT' && !editingUserCompanyId.trim() && !editingUserCompanyName.trim()) {
       setStatus(`${editingUserRole} precisa de empresa para salvar.`);
       return;
     }
@@ -3269,18 +3289,18 @@ const Dashboard = () => {
       }
 
       cancelUserEditor();
-      setStatus('Cliente atualizado com sucesso.');
-      showToast('Cliente atualizado');
+      setStatus('Usuario atualizado com sucesso.');
+      showToast('Usuario atualizado');
       await fetchAdminData();
     } catch (_error) {
-      setStatus('Erro de rede ao atualizar cliente.');
+      setStatus('Erro de rede ao atualizar usuario.');
     } finally {
       setAdminLoading(false);
     }
   };
 
   const deleteUser = async (userId: string) => {
-    if (!token || !window.confirm('Excluir este cliente?')) {
+    if (!token || !window.confirm('Excluir este usuario?')) {
       return;
     }
 
@@ -3302,11 +3322,11 @@ const Dashboard = () => {
         cancelUserEditor();
       }
 
-      setStatus('Cliente excluido com sucesso.');
-      showToast('Cliente excluido');
+      setStatus('Usuario excluido com sucesso.');
+      showToast('Usuario excluido');
       await fetchAdminData();
     } catch (_error) {
-      setStatus('Erro de rede ao excluir cliente.');
+      setStatus('Erro de rede ao excluir usuario.');
     } finally {
       setAdminLoading(false);
     }
@@ -5369,8 +5389,8 @@ const Dashboard = () => {
           {role === 'ADMIN' && activeView === 'clients' ? (
             <div className="grid gap-6">
               <div className={themedPanelClass}>
-                <h1 className={themedTitleClass}>Clientes e usuarios</h1>
-                <p className={['mt-1', themedSubtextClass].join(' ')}>Crie, edite e exclua usuarios do sistema.</p>
+                <h1 className={themedTitleClass}>Equipe</h1>
+                <p className={['mt-1', themedSubtextClass].join(' ')}>Crie, edite e exclua usuarios (ADMIN, DEV e CLIENT) do sistema.</p>
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <input className={themedInputClass} placeholder="Nome" value={userFormName} onChange={(event) => setUserFormName(event.target.value)} />
                   <input className={themedInputClass} placeholder="Email" value={userFormEmail} onChange={(event) => setUserFormEmail(event.target.value)} />
@@ -5423,7 +5443,7 @@ const Dashboard = () => {
               ) : null}
 
               <div className="grid gap-3">
-                {managedUsers.map((user) => {
+                {managedUsersSorted.map((user) => {
                   const userCompanyId = String(user.company_id || user.companyId || '').trim() || 'Sem empresa';
 
                   return (
@@ -6404,7 +6424,7 @@ const Dashboard = () => {
             </motion.div>
           ) : null}
 
-          {activeView === 'sales' || activeView === 'pipeline' ? (
+          {activeView === 'sales' ? (
             <div className="grid gap-6">
               <div className={[
                 'rounded-2xl p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg',
