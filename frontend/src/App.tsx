@@ -7,6 +7,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const PlansPage = lazy(() => import('./pages/PlansPage'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const PDVPage = lazy(() => import('./pages/PDVPage'));
 
 const RouteLoader = () => (
   <main className="saas-page grid place-items-center p-6 text-slate-100">
@@ -45,6 +46,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pdv"
+          element={
+            <ProtectedRoute>
+              <PDVPage />
             </ProtectedRoute>
           }
         />

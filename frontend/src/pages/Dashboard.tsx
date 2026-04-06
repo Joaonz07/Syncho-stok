@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DragEvent } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch as fetch, getApiBaseUrl } from '../lib/api';
@@ -39,7 +39,8 @@ import {
   Plus,
   Trash2,
   Lock,
-  Download
+  Download,
+  ReceiptText
 } from 'lucide-react';
 import {
   LineChart,
@@ -185,13 +186,14 @@ type AdminPlanConfig = {
 };
 
 type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat' | 'analytics' | 'admin' | 'integrations';
+type SidebarPath = DashboardView | 'pdv';
 
 type SidebarGroup = 'Comercial' | 'Operacao' | 'Sistema';
 
 type SidebarMenuItem = {
   name: string;
   icon: React.ComponentType<{ className?: string }>;
-  path: DashboardView;
+  path: SidebarPath;
   group: SidebarGroup;
   adminOnly?: boolean;
   devOnly?: boolean;
@@ -766,6 +768,7 @@ const DEFAULT_ADMIN_PLANS: AdminPlanConfig[] = [
 ];
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const { companyId, role, isAuthenticated, loading: authLoading, signOut } = useAuth();
   const token = getAccessToken();
   const currentUserId = useMemo(() => getUserIdFromJwt(token), [token]);
@@ -4091,6 +4094,7 @@ const Dashboard = () => {
       { name: 'Agenda', icon: BarChart3, path: 'sales', group: 'Comercial', adminOnly: true },
       { name: 'Financeiro', icon: DollarSign, path: 'analytics', group: 'Comercial', adminOnly: true },
       { name: 'Servicos', icon: Package, path: 'products', group: 'Operacao', adminOnly: true },
+      { name: 'PDV', icon: ReceiptText, path: 'pdv', group: 'Operacao', adminOnly: true },
       { name: 'Orcamentos', icon: CreditCard, path: 'sales', group: 'Operacao', adminOnly: true },
       { name: 'Briefings', icon: Sparkles, path: 'companies', group: 'Operacao', adminOnly: true },
       { name: 'Paginas', icon: LayoutDashboard, path: 'settings', group: 'Operacao', adminOnly: true },
@@ -4102,6 +4106,7 @@ const Dashboard = () => {
       { name: 'Analise', icon: Activity, path: 'analytics', group: 'Comercial' },
       { name: 'Vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
       { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
+      { name: 'PDV', icon: ReceiptText, path: 'pdv', group: 'Operacao' },
       { name: 'Estoque', icon: Boxes, path: 'inventory', group: 'Operacao' },
       { name: 'Integracoes', icon: Plug, path: 'integrations', group: 'Operacao', devOnly: true },
       { name: 'Chat / Suporte', icon: MessageCircle, path: 'chat', group: 'Sistema' },
@@ -4119,6 +4124,12 @@ const Dashboard = () => {
     .filter((section) => section.items.length > 0);
 
   const handleMenuClick = (item: SidebarMenuItem) => {
+    if (item.path === 'pdv') {
+      setActiveMenuName(item.name);
+      navigate('/pdv');
+      return;
+    }
+
     if (role === 'ADMIN' && item.path === 'admin') {
       const sectionByMenuName: Record<string, 'overview' | 'companies' | 'users' | 'plans' | 'support'> = {
         Dashboard: 'overview',
