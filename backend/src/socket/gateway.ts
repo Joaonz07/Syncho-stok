@@ -3,11 +3,12 @@ import { Server as SocketServer } from 'socket.io';
 import { getAllowedOrigins } from '../config/runtime';
 import { supabaseAdmin } from '../supabaseClient';
 import { ensureUserHasCompany, normalizeUserRole } from '../services/saasService';
+import type { UserRole } from '../types/auth';
 
 type ConnectedUser = {
   id: string;
   email: string;
-  role: 'ADMIN' | 'CLIENT';
+  role: UserRole;
   companyId: string | null;
   name: string;
 };
@@ -18,7 +19,7 @@ type SupportChatMessage = {
   requestId: string | null;
   senderId: string;
   senderName: string;
-  senderRole: 'ADMIN' | 'CLIENT';
+  senderRole: UserRole;
   content: string;
   createdAt: string;
 };
@@ -33,7 +34,7 @@ type IntegrationChatMessage = {
   userId: string;
   userName: string;
   content: string;
-  senderRole: 'ADMIN' | 'CLIENT';
+  senderRole: UserRole;
   createdAt: string;
 };
 

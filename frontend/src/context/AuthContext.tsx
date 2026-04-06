@@ -6,12 +6,12 @@ import { clearSession, getAccessToken, getCompanyId, getRole, saveSession } from
 type LoginResult = {
   success: boolean;
   message?: string;
-  role?: 'ADMIN' | 'CLIENT';
+  role?: 'ADMIN' | 'DEV' | 'CLIENT';
 };
 
 type AuthContextValue = {
   loading: boolean;
-  role: 'ADMIN' | 'CLIENT' | null;
+  role: 'ADMIN' | 'DEV' | 'CLIENT' | null;
   companyId: string | null;
   isAuthenticated: boolean;
   signIn: (email: string, password: string, options?: { remember?: boolean }) => Promise<LoginResult>;
@@ -20,8 +20,10 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const normalizeRole = (value: unknown): 'ADMIN' | 'CLIENT' =>
-  String(value || 'CLIENT').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'CLIENT';
+const normalizeRole = (value: unknown): 'ADMIN' | 'DEV' | 'CLIENT' => {
+  const normalized = String(value || 'CLIENT').toUpperCase();
+  return normalized === 'ADMIN' ? 'ADMIN' : normalized === 'DEV' ? 'DEV' : 'CLIENT';
+};
 
 const safeParseJson = async (response: Response) => {
   try {
@@ -54,7 +56,7 @@ const getProfileFromApi = async (accessToken: string) => {
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [accessToken, setAccessToken] = useState('');
-  const [role, setRole] = useState<'ADMIN' | 'CLIENT' | null>(null);
+  const [role, setRole] = useState<'ADMIN' | 'DEV' | 'CLIENT' | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
 
   const syncSessionState = async (token: string) => {

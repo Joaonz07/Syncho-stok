@@ -12,6 +12,7 @@ datasource db {
 
 enum UserRole {
   ADMIN
+  DEV
   CLIENT
 }
 

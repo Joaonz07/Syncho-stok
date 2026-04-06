@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/authMiddleware';
+import { requireDevRole, validateCompanyAccess } from '../middleware/authorizationMiddleware';
+import type { UserRole } from '../types/auth';
 import { supabaseAdmin } from '../supabaseClient';
 import { getScopedData } from '../services/dataAccess';
 import {
@@ -60,7 +62,7 @@ type SupportChatMessage = {
   requestId: string | null;
   senderId: string;
   senderName: string;
-  senderRole: 'ADMIN' | 'CLIENT';
+  senderRole: UserRole;
   content: string;
   createdAt: string;
 };
@@ -81,7 +83,7 @@ type IntegrationChatMessage = {
   conversationId: string;
   userId: string;
   userName: string;
-  senderRole: 'ADMIN' | 'CLIENT';
+  senderRole: UserRole;
   content: string;
   createdAt: string;
 };
@@ -189,7 +191,7 @@ const mapSupportChatMessages = async (
     )
   );
 
-  const senderMap = new Map<string, { name: string; role: 'ADMIN' | 'CLIENT' }>();
+  const senderMap = new Map<string, { name: string; role: UserRole }>();
 
   if (senderIds.length > 0) {
     for (const tableName of ['users', 'User']) {
@@ -210,7 +212,9 @@ const mapSupportChatMessages = async (
             String(rawUser.name || '').trim() ||
             String(rawUser.email || '').trim().split('@')[0] ||
             'Usuario';
-          const senderRole = String(rawUser.role || 'CLIENT').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'CLIENT';
+          
+          const roleStr = String(rawUser.role || 'CLIENT').toUpperCase();
+          const senderRole: UserRole = roleStr === 'ADMIN' ? 'ADMIN' : roleStr === 'DEV' ? 'DEV' : 'CLIENT';
           senderMap.set(senderId, { name: senderName, role: senderRole });
         }
 
@@ -379,7 +383,10 @@ const listIntegrationMessagesWithAliases = async (
                 userName:
                   String(row.user_name || row.userName || row.contact_name || row.contactName || '').trim() ||
                   'Contato',
-                senderRole: String(row.sender_role || row.senderRole || 'CLIENT').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'CLIENT',
+                senderRole: (() => {
+                  const roleStr = String(row.sender_role || row.senderRole || 'CLIENT').toUpperCase();
+                  return roleStr === 'ADMIN' ? 'ADMIN' : roleStr === 'DEV' ? 'DEV' : 'CLIENT';
+                })(),
                 content: String(row.content || row.message || ''),
                 createdAt: String(row.created_at || row.createdAt || new Date().toISOString())
               } as IntegrationChatMessage;
@@ -737,7 +744,7 @@ const updateProductWithAliases = async (
 const ensureUserInPublicTable = async (params: {
   userId: string;
   fallbackEmail: string;
-  fallbackRole: 'ADMIN' | 'CLIENT';
+  fallbackRole: UserRole;
   fallbackName?: string;
   companyId: string | null;
 }) => {
@@ -2274,7 +2281,7 @@ router.patch('/support-requests/:id', requireAuth, async (req, res) => {
   });
 });
 
-router.get('/integrations/custom-api', requireAuth, async (req, res) => {
+router.get('/integrations/custom-api', requireAuth, requireDevRole, async (req, res) => {
   if (!req.authUser) {
     return res.status(401).json({ message: 'Usuario nao autenticado.' });
   }
@@ -2283,6 +2290,11 @@ router.get('/integrations/custom-api', requireAuth, async (req, res) => {
 
   if (!companyId) {
     return res.status(400).json({ message: 'companyId e obrigatorio para consultar a API customizada.' });
+  }
+
+  // Validar acesso à empresa
+  if (req.authUser.role !== 'ADMIN' && req.authUser.companyId !== companyId) {
+    return res.status(403).json({ message: 'Acesso negado. Voce so pode acessar dados da sua propia empresa.' });
   }
 
   const profile = await getCompanyIntegrationProfile(companyId);
@@ -2300,7 +2312,7 @@ router.get('/integrations/custom-api', requireAuth, async (req, res) => {
   });
 });
 
-router.post('/integrations/custom-api/regenerate', requireAuth, async (req, res) => {
+router.post('/integrations/custom-api/regenerate', requireAuth, requireDevRole, async (req, res) => {
   if (!req.authUser) {
     return res.status(401).json({ message: 'Usuario nao autenticado.' });
   }
@@ -2311,6 +2323,11 @@ router.post('/integrations/custom-api/regenerate', requireAuth, async (req, res)
     return res.status(400).json({ message: 'companyId e obrigatorio para regenerar a API key.' });
   }
 
+  // Validar acesso à empresa
+  if (req.authUser.role !== 'ADMIN' && req.authUser.companyId !== companyId) {
+    return res.status(403).json({ message: 'Acesso negado. Voce so pode acessar dados da sua propia empresa.' });
+  }
+
   const profile = await regenerateCompanyIntegrationApiKey(companyId);
 
   return res.status(200).json({
@@ -2319,7 +2336,7 @@ router.post('/integrations/custom-api/regenerate', requireAuth, async (req, res)
   });
 });
 
-router.put('/integrations/custom-api/webhooks', requireAuth, async (req, res) => {
+router.put('/integrations/custom-api/webhooks', requireAuth, requireDevRole, async (req, res) => {
   if (!req.authUser) {
     return res.status(401).json({ message: 'Usuario nao autenticado.' });
   }
@@ -2329,6 +2346,11 @@ router.put('/integrations/custom-api/webhooks', requireAuth, async (req, res) =>
 
   if (!companyId) {
     return res.status(400).json({ message: 'companyId e obrigatorio para salvar webhooks.' });
+  }
+
+  // Validar acesso à empresa
+  if (req.authUser.role !== 'ADMIN' && req.authUser.companyId !== companyId) {
+    return res.status(403).json({ message: 'Acesso negado. Voce so pode acessar dados da sua propia empresa.' });
   }
 
   const normalizedWebhooks = rawWebhooks.map((webhook: Record<string, unknown>) => ({

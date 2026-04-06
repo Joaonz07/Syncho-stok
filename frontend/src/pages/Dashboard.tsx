@@ -37,7 +37,8 @@ import {
   ShieldCheck,
   Code2,
   Plus,
-  Trash2
+  Trash2,
+  Lock
 } from 'lucide-react';
 import {
   LineChart,
@@ -181,6 +182,7 @@ type SidebarMenuItem = {
   path: DashboardView;
   group: SidebarGroup;
   adminOnly?: boolean;
+  devOnly?: boolean;
 };
 
 type SupportRequestStatus = 'PENDING' | 'IN_REVIEW' | 'DONE';
@@ -751,7 +753,7 @@ const Dashboard = () => {
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editingUserName, setEditingUserName] = useState('');
   const [editingUserEmail, setEditingUserEmail] = useState('');
-  const [editingUserRole, setEditingUserRole] = useState<'ADMIN' | 'CLIENT'>('CLIENT');
+  const [editingUserRole, setEditingUserRole] = useState<'ADMIN' | 'DEV' | 'CLIENT'>('CLIENT');
   const [editingUserCompanyId, setEditingUserCompanyId] = useState('');
   const [editingUserCompanyName, setEditingUserCompanyName] = useState('');
   const [editingUserAccessUntil, setEditingUserAccessUntil] = useState('');
@@ -3160,8 +3162,8 @@ const Dashboard = () => {
       return;
     }
 
-    if (editingUserRole === 'CLIENT' && !editingUserCompanyId.trim() && !editingUserCompanyName.trim()) {
-      setStatus('CLIENT precisa de empresa para salvar.');
+    if ((editingUserRole === 'CLIENT' || editingUserRole === 'DEV') && !editingUserCompanyId.trim() && !editingUserCompanyName.trim()) {
+      setStatus(`${editingUserRole} precisa de empresa para salvar.`);
       return;
     }
 
@@ -3179,9 +3181,9 @@ const Dashboard = () => {
           email: editingUserEmail.trim(),
           role: editingUserRole,
           companyId: editingUserRole === 'ADMIN' ? null : editingUserCompanyId.trim() || null,
-          companyName: editingUserRole === 'CLIENT' ? editingUserCompanyName.trim() || null : null,
+          companyName: (editingUserRole === 'CLIENT' || editingUserRole === 'DEV') ? editingUserCompanyName.trim() || null : null,
           accessUntil:
-            editingUserRole === 'CLIENT'
+            (editingUserRole === 'CLIENT' || editingUserRole === 'DEV')
               ? editingUserAccessUntil
                 ? new Date(editingUserAccessUntil).toISOString()
                 : null
@@ -3914,13 +3916,17 @@ const Dashboard = () => {
     { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
     { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
     { name: 'Estoque', icon: Boxes, path: 'inventory', group: 'Operacao' },
-    { name: 'Integracoes', icon: Plug, path: 'integrations', group: 'Operacao' },
+    { name: 'Integracoes', icon: Plug, path: 'integrations', group: 'Operacao', devOnly: true },
     { name: 'Chat / Suporte', icon: MessageCircle, path: 'chat', group: 'Sistema' },
     { name: 'Planos', icon: CreditCard, path: 'settings', group: 'Sistema', adminOnly: true },
     { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema' }
   ];
 
-  const visibleMenuItems = menuItems.filter((item) => (item.adminOnly ? role === 'ADMIN' : true));
+  const visibleMenuItems = menuItems.filter((item) => {
+    if (item.adminOnly && role !== 'ADMIN') return false;
+    if (item.devOnly && role !== 'DEV') return false;
+    return true;
+  });
   const menuGroups: SidebarGroup[] = ['Comercial', 'Operacao', 'Sistema'];
   const groupedMenuItems = menuGroups
     .map((group) => ({ group, items: visibleMenuItems.filter((item) => item.group === group) }))
@@ -4146,7 +4152,9 @@ const Dashboard = () => {
             { key: 'sales' as const, icon: BarChart3, label: 'Vendas' },
             { key: 'products' as const, icon: Package, label: 'Produtos' },
             { key: 'inventory' as const, icon: Boxes, label: 'Estoque' },
-            { key: 'integrations' as const, icon: Plug, label: 'Integr.' },
+            ...(role === 'DEV' || role === 'ADMIN' ? [
+              { key: 'integrations' as const, icon: Plug, label: 'Integr.' },
+            ] : []),
             ...(role === 'ADMIN' ? [
               { key: 'admin' as const, icon: Sparkles, label: 'Admin' },
               { key: 'companies' as const, icon: LayoutDashboard, label: 'Empresas' },
@@ -5292,8 +5300,9 @@ const Dashboard = () => {
                   <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <input className={themedInputClass} value={editingUserName} onChange={(event) => setEditingUserName(event.target.value)} />
                     <input className={themedInputClass} value={editingUserEmail} onChange={(event) => setEditingUserEmail(event.target.value)} />
-                    <select className={themedSelectClass} value={editingUserRole} onChange={(event) => setEditingUserRole(event.target.value as 'ADMIN' | 'CLIENT')}>
+                    <select className={themedSelectClass} value={editingUserRole} onChange={(event) => setEditingUserRole(event.target.value as 'ADMIN' | 'DEV' | 'CLIENT')}>
                       <option className={themedOptionClass} value="CLIENT">CLIENT</option>
+                      <option className={themedOptionClass} value="DEV">DEV</option>
                       <option className={themedOptionClass} value="ADMIN">ADMIN</option>
                     </select>
                     <select className={themedSelectClass} value={editingUserCompanyId} onChange={(event) => setEditingUserCompanyId(event.target.value)} disabled={editingUserRole === 'ADMIN'}>
@@ -5496,7 +5505,7 @@ const Dashboard = () => {
             </div>
           ) : null}
 
-          {activeView === 'integrations' ? (
+          {activeView === 'integrations' && (role === 'DEV' || role === 'ADMIN') ? (
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
@@ -6002,6 +6011,32 @@ const Dashboard = () => {
                   </div>
                 </div>
               </motion.div>
+            </motion.div>
+          ) : null}
+
+          {activeView === 'integrations' && role !== 'DEV' && role !== 'ADMIN' ? (
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="mx-auto w-full max-w-2xl"
+            >
+              <div className={[
+                'rounded-3xl border p-8 text-center shadow-xl',
+                isDarkTheme ? 'border-red-500/20 bg-red-950/10' : 'border-red-200 bg-red-50'
+              ].join(' ')}>
+                <div className="flex justify-center mb-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/20">
+                    <Lock className="h-7 w-7 text-red-400" />
+                  </div>
+                </div>
+                <h2 className={['text-xl font-bold', isDarkTheme ? 'text-red-300' : 'text-red-700'].join(' ')}>
+                  Acesso Restrito
+                </h2>
+                <p className={['mt-2 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-600'].join(' ')}>
+                  A secao de Integracoes API esta disponivel apenas para usuarios com role de Desenvolvedor (DEV).
+                </p>
+              </div>
             </motion.div>
           ) : null}
 

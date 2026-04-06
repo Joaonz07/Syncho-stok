@@ -1,6 +1,6 @@
 export type AuthSessionPayload = {
   accessToken: string;
-  role: 'ADMIN' | 'CLIENT';
+  role: 'ADMIN' | 'DEV' | 'CLIENT';
   companyId: string | null;
 };
 
