@@ -774,7 +774,7 @@ const Dashboard = () => {
   const companyIdFromJwt = useMemo(() => getCompanyIdFromJwt(token), [token]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [activeView, setActiveView] = useState<DashboardView>('analytics');
+  const [activeView, setActiveView] = useState<DashboardView>('pipeline');
   const [activeMenuName, setActiveMenuName] = useState('Vendas');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -4425,6 +4425,11 @@ const Dashboard = () => {
             transition={{ duration: 0.45, ease: 'easeOut' }}
             className="mb-5 space-y-4"
           >
+            <header>
+              <h1 className="text-2xl font-bold text-white md:text-3xl">Bem-vindo de volta, {displayUserName || 'Usuário'}</h1>
+              <p className="mt-1 text-sm text-gray-400">Acompanhe o desempenho do seu negocio em tempo real</p>
+            </header>
+
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {summaryCards.map((card, index) => {
                 const Icon = card.icon;
@@ -6512,7 +6517,7 @@ const Dashboard = () => {
             </motion.div>
           ) : null}
 
-          {activeView === 'sales' ? (
+          {activeView === 'sales' || activeView === 'pipeline' ? (
             <div className="grid gap-6">
               <div className={[
                 'rounded-2xl p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg',
@@ -7260,24 +7265,18 @@ const Dashboard = () => {
                 initial={{ opacity: 0, y: -16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="flex flex-col gap-2"
+                className="flex flex-col gap-1"
               >
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/30">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/30">
                     <Activity className="h-5 w-5 text-white" />
                   </div>
-                  <div className="space-y-1">
-                    <p className={[
-                      'text-base font-bold leading-tight md:text-lg',
-                      isDarkTheme ? 'text-slate-100' : 'text-slate-900'
-                    ].join(' ')}>
-                      Bem-vindo de volta, {displayUserName || 'Usuario'}
-                    </p>
-                    <h1 className={['text-2xl font-black tracking-tight md:text-3xl', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>
+                  <div>
+                    <h1 className={['text-2xl font-black tracking-tight', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>
                       Dashboard de Análise
                     </h1>
-                    <p className={['text-sm md:text-base', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>
-                      Acompanhe o desempenho do seu negocio em tempo real.
+                    <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Visão premium dos seus indicadores de negócio
                     </p>
                   </div>
                 </div>
