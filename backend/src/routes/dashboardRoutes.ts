@@ -916,6 +916,29 @@ const updateInventoryQuantityWithAliases = async (productId: string, companyId: 
   return createInventoryRecordWithAliases(productId, companyId, normalizedQuantity);
 };
 
+const deleteProductByIdWithAliases = async (productId: string, companyId: string) => {
+  for (const tableName of tableAliases.products) {
+    for (const companyField of companyFieldAliases) {
+      const response = await supabaseAdmin
+        .from(tableName)
+        .delete()
+        .eq('id', productId)
+        .eq(companyField, companyId)
+        .select('*')
+        .single();
+
+      if (!response.error) {
+        return response;
+      }
+    }
+  }
+
+  return {
+    data: null,
+    error: { message: 'Falha ao remover produto apos inconsistência de estoque.' }
+  };
+};
+
 const deleteInventoryByProductWithAliases = async (productId: string, companyId: string) => {
   for (const tableName of tableAliases.inventory) {
     for (const companyField of companyFieldAliases) {
@@ -1273,7 +1296,14 @@ router.post('/products', requireAuth, async (req, res) => {
         const createdProductId = String(createdProduct?.id || '').trim();
 
         if (createdProductId) {
-          await createInventoryRecordWithAliases(createdProductId, companyId, quantity);
+          const inventoryCreated = await createInventoryRecordWithAliases(createdProductId, companyId, quantity);
+
+          if (inventoryCreated.error) {
+            await deleteProductByIdWithAliases(createdProductId, companyId);
+            return res.status(500).json({
+              message: 'Falha ao vincular produto ao estoque. Operacao revertida para manter consistencia.'
+            });
+          }
         }
 
         return res.status(201).json({ message: 'Produto criado com sucesso.', product: response.data });
