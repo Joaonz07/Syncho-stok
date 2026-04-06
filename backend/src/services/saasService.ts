@@ -1,5 +1,6 @@
 import type { User } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../supabaseClient';
+import type { UserRole } from '../types/auth';
 
 export type PlanName = 'BASIC' | 'PRO' | 'PREMIUM';
 export type SubscriptionStatus = 'ACTIVE' | 'PAST_DUE' | 'CANCELED' | 'BLOCKED';
@@ -55,8 +56,19 @@ const normalizeStatus = (value: unknown): SubscriptionStatus => {
   return 'ACTIVE';
 };
 
-export const normalizeUserRole = (roleValue: unknown): 'ADMIN' | 'CLIENT' =>
-  String(roleValue || 'CLIENT').trim().toUpperCase() === 'ADMIN' ? 'ADMIN' : 'CLIENT';
+export const normalizeUserRole = (roleValue: unknown): 'ADMIN' | 'DEV' | 'CLIENT' => {
+  const normalizedRole = String(roleValue || 'CLIENT').trim().toUpperCase();
+
+  if (normalizedRole === 'ADMIN') {
+    return 'ADMIN';
+  }
+
+  if (normalizedRole === 'DEV') {
+    return 'DEV';
+  }
+
+  return 'CLIENT';
+};
 
 const extractCompanyId = (row: Record<string, unknown> | null | undefined) =>
   String(row?.company_id || row?.companyId || row?.companyID || '').trim() || null;
@@ -313,7 +325,7 @@ const updatePublicUserCompanyLink = async (params: {
   userId: string;
   email: string;
   name?: string | null;
-  role: 'ADMIN' | 'CLIENT';
+  role: UserRole;
   companyId: string | null;
 }) => {
   const updatePayloads: Array<Record<string, unknown>> = [
@@ -381,7 +393,7 @@ const updatePublicUserCompanyLink = async (params: {
 
 const syncAuthUserCompanyMetadata = async (params: {
   authUser: User;
-  role: 'ADMIN' | 'CLIENT';
+  role: UserRole;
   companyId: string | null;
   companyName: string;
   userName?: string | null;

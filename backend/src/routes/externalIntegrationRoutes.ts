@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { getScopedData } from '../services/dataAccess';
+import { logSecurityEvent } from '../services/securityLogger';
 import {
   customIntegrationEvents,
   dispatchCompanyWebhookEvent,
@@ -14,6 +15,8 @@ const lowStockThreshold = 5;
 const rateLimitWindowMs = 60_000;
 const rateLimitMaxRequests = 120;
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+const allowedLeadStatus = ['NOVO_CONTATO', 'EM_NEGOCIACAO', 'PROPOSTA_ENVIADA', 'FECHADO'] as const;
+const allowedLeadPriority = ['BAIXA', 'MEDIA', 'ALTA'] as const;
 
 const tableAliases = {
   products: ['products'],
@@ -42,14 +45,39 @@ const applyRateLimit = (apiKey: string) => {
 const requireIntegrationApiKey = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = String(req.headers.authorization || '').trim();
 
-  if (!authHeader.startsWith('Bearer ')) {
+  if (!/^Bearer\s+[A-Za-z0-9\-_.]+$/i.test(authHeader)) {
     return res.status(401).json({ message: 'Bearer token nao informado.' });
   }
 
   const apiKey = authHeader.slice('Bearer '.length).trim();
+
+  if (!/^syncho_[A-Za-z0-9]{20,}$/.test(apiKey)) {
+    logSecurityEvent({
+      level: 'WARN',
+      event: 'integration_invalid_api_key_format',
+      requestId: req.requestId,
+      ip: req.ip || null,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: 401
+    });
+
+    return res.status(401).json({ message: 'API key invalida.' });
+  }
+
   const validated = await validateCompanyIntegrationApiKey(apiKey);
 
   if (!validated) {
+    logSecurityEvent({
+      level: 'WARN',
+      event: 'integration_api_key_not_found',
+      requestId: req.requestId,
+      ip: req.ip || null,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: 401
+    });
+
     return res.status(401).json({ message: 'API key invalida.' });
   }
 
@@ -57,6 +85,18 @@ const requireIntegrationApiKey = async (req: Request, res: Response, next: NextF
 
   if (!rateLimit.allowed) {
     res.setHeader('Retry-After', String(Math.ceil((rateLimit.retryAfterMs || 0) / 1000)));
+
+    logSecurityEvent({
+      level: 'WARN',
+      event: 'integration_api_rate_limited',
+      requestId: req.requestId,
+      companyId: validated.companyId,
+      ip: req.ip || null,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: 429
+    });
+
     return res.status(429).json({ message: 'Limite de requisicoes excedido para esta API key.' });
   }
 
@@ -64,6 +104,16 @@ const requireIntegrationApiKey = async (req: Request, res: Response, next: NextF
     companyId: validated.companyId,
     apiKey: validated.apiKey
   };
+
+  logSecurityEvent({
+    event: 'integration_api_authenticated',
+    requestId: req.requestId,
+    companyId: validated.companyId,
+    ip: req.ip || null,
+    method: req.method,
+    path: req.originalUrl,
+    statusCode: 200
+  });
 
   return next();
 };
@@ -226,6 +276,22 @@ router.post('/leads', requireIntegrationApiKey, async (req, res) => {
     return res.status(400).json({ message: 'name e obrigatorio.' });
   }
 
+  if (name.length > 120 || notes.length > 2000) {
+    return res.status(400).json({ message: 'Campos excedem o limite permitido.' });
+  }
+
+  if (!allowedLeadStatus.includes(status as (typeof allowedLeadStatus)[number])) {
+    return res.status(400).json({ message: 'status invalido.' });
+  }
+
+  if (!allowedLeadPriority.includes(priority as (typeof allowedLeadPriority)[number])) {
+    return res.status(400).json({ message: 'priority invalida.' });
+  }
+
+  if (!Number.isFinite(value) || value < 0 || value > 10_000_000) {
+    return res.status(400).json({ message: 'value deve estar entre 0 e 10000000.' });
+  }
+
   let created = null as Record<string, unknown> | null;
   let lastError: string | null = null;
 
@@ -268,6 +334,10 @@ router.post('/sales', requireIntegrationApiKey, async (req, res) => {
         .filter((item) => item.productId && Number.isFinite(item.quantity) && item.quantity > 0)
     : [];
   let total = Number(req.body?.total || 0);
+
+  if (Array.isArray(req.body?.items) && req.body.items.length > 100) {
+    return res.status(400).json({ message: 'items excede o limite de 100 produtos por venda.' });
+  }
 
   if (!companyId) {
     return res.status(401).json({ message: 'Empresa nao resolvida para a API key.' });
@@ -325,6 +395,10 @@ router.post('/sales', requireIntegrationApiKey, async (req, res) => {
     return res.status(400).json({ message: 'total deve ser maior que zero.' });
   }
 
+  if (total > 100_000_000) {
+    return res.status(400).json({ message: 'total excede o limite permitido.' });
+  }
+
   let createdSale = null as Record<string, unknown> | null;
   let lastError: string | null = null;
 
@@ -368,6 +442,16 @@ router.post('/sales', requireIntegrationApiKey, async (req, res) => {
 });
 
 router.get('/meta', requireIntegrationApiKey, (req, res) => {
+  logSecurityEvent({
+    event: 'integration_api_meta_access',
+    requestId: req.requestId,
+    companyId: req.integrationAuth?.companyId || null,
+    ip: req.ip || null,
+    method: req.method,
+    path: req.originalUrl,
+    statusCode: 200
+  });
+
   return res.status(200).json({
     companyId: req.integrationAuth?.companyId || null,
     events: customIntegrationEvents,
