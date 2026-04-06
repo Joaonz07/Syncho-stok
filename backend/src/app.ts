@@ -1,4 +1,5 @@
 ﻿import { existsSync } from 'fs';
+import compression from 'compression';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
@@ -76,6 +77,7 @@ app.use(
 		maxAge: 86400
 	})
 );
+app.use(compression({ threshold: 1024 }));
 app.use(express.json({ limit: '60kb', strict: true }));
 app.use(express.urlencoded({ extended: false, limit: '60kb' }));
 app.use(globalRateLimit);
@@ -84,7 +86,24 @@ app.use(sanitizeInput);
 app.use(requestAuditLogger);
 
 if (canServeFrontend) {
-	app.use(express.static(publicPath));
+	app.use(
+		express.static(publicPath, {
+			maxAge: '7d',
+			setHeaders: (res, filePath) => {
+				if (filePath.endsWith('index.html')) {
+					res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+					return;
+				}
+
+				if (/(\.|\/)(js|css|woff2?|png|jpg|jpeg|gif|svg|webp|ico)$/.test(filePath)) {
+					res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+					return;
+				}
+
+				res.setHeader('Cache-Control', 'public, max-age=86400');
+			}
+		})
+	);
 }
 
 app.use('/api/auth', authRateLimit, authRoutes);
@@ -98,6 +117,7 @@ app.get('/health', (_req, res) => {
 
 if (canServeFrontend) {
 	app.get('*', (_req, res) => {
+		res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 		res.sendFile(path.join(publicPath, 'index.html'));
 	});
 } else {
