@@ -774,7 +774,7 @@ const Dashboard = () => {
   const companyIdFromJwt = useMemo(() => getCompanyIdFromJwt(token), [token]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [activeView, setActiveView] = useState<DashboardView>('pipeline');
+  const [activeView, setActiveView] = useState<DashboardView>('analytics');
   const [activeMenuName, setActiveMenuName] = useState('Vendas');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -4425,11 +4425,6 @@ const Dashboard = () => {
             transition={{ duration: 0.45, ease: 'easeOut' }}
             className="mb-5 space-y-4"
           >
-            <header>
-              <h1 className="text-2xl font-bold text-white md:text-3xl">Bem-vindo de volta, {displayUserName || 'Usuário'}</h1>
-              <p className="mt-1 text-sm text-gray-400">Acompanhe o desempenho do seu negocio em tempo real</p>
-            </header>
-
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {summaryCards.map((card, index) => {
                 const Icon = card.icon;
@@ -7276,7 +7271,7 @@ const Dashboard = () => {
                       Dashboard de Análise
                     </h1>
                     <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                      Visão premium dos seus indicadores de negócio
+                      Bem-vindo de volta, {displayUserName || 'Usuario'}. Acompanhe o desempenho do seu negocio em tempo real.
                     </p>
                   </div>
                 </div>
