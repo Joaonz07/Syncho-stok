@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/authMiddleware';
-import { requireDevRole, validateCompanyAccess } from '../middleware/authorizationMiddleware';
+import { requireAdminOrDevRole } from '../middleware/authorizationMiddleware';
 import type { UserRole } from '../types/auth';
 import { supabaseAdmin } from '../supabaseClient';
 import { getScopedData } from '../services/dataAccess';
@@ -2281,7 +2281,7 @@ router.patch('/support-requests/:id', requireAuth, async (req, res) => {
   });
 });
 
-router.get('/integrations/custom-api', requireAuth, requireDevRole, async (req, res) => {
+router.get('/integrations/custom-api', requireAuth, requireAdminOrDevRole, async (req, res) => {
   if (!req.authUser) {
     return res.status(401).json({ message: 'Usuario nao autenticado.' });
   }
@@ -2312,7 +2312,7 @@ router.get('/integrations/custom-api', requireAuth, requireDevRole, async (req, 
   });
 });
 
-router.post('/integrations/custom-api/regenerate', requireAuth, requireDevRole, async (req, res) => {
+router.post('/integrations/custom-api/regenerate', requireAuth, requireAdminOrDevRole, async (req, res) => {
   if (!req.authUser) {
     return res.status(401).json({ message: 'Usuario nao autenticado.' });
   }
@@ -2336,7 +2336,7 @@ router.post('/integrations/custom-api/regenerate', requireAuth, requireDevRole, 
   });
 });
 
-router.put('/integrations/custom-api/webhooks', requireAuth, requireDevRole, async (req, res) => {
+router.put('/integrations/custom-api/webhooks', requireAuth, requireAdminOrDevRole, async (req, res) => {
   if (!req.authUser) {
     return res.status(401).json({ message: 'Usuario nao autenticado.' });
   }

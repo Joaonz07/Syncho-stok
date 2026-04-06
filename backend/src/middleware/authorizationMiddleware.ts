@@ -1,11 +1,12 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { AuthUser } from '../types/auth';
+import type { UserRole } from '../types/auth';
 
 /**
  * Middleware para verificar se o usuário tem um role específico
  * @param allowedRoles - array de roles permitidos
  */
-export const requireRole = (allowedRoles: string[]) => {
+export const requireRole = (allowedRoles: UserRole[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const authUser = (req as any).authUser as AuthUser | undefined;
 
@@ -86,6 +87,25 @@ export const requireDevRole = (req: Request, res: Response, next: NextFunction) 
   if (authUser.role !== 'DEV') {
     return res.status(403).json({ 
       message: 'Acesso negado. Apenas usuarios com role DEV podem acessar as APIs de integracao.' 
+    });
+  }
+
+  next();
+};
+
+/**
+ * Middleware para permitir ADMIN e DEV em endpoints de integração
+ */
+export const requireAdminOrDevRole = (req: Request, res: Response, next: NextFunction) => {
+  const authUser = (req as any).authUser as AuthUser | undefined;
+
+  if (!authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  if (authUser.role !== 'ADMIN' && authUser.role !== 'DEV') {
+    return res.status(403).json({
+      message: 'Acesso negado. Apenas ADMIN ou DEV podem acessar este recurso.'
     });
   }
 
