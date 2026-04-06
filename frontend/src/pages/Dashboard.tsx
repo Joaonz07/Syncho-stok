@@ -3908,19 +3908,31 @@ const Dashboard = () => {
     return <Navigate to="/login" replace />;
   }
 
-  const menuItems: SidebarMenuItem[] = [
-    { name: 'Dashboard', icon: LayoutDashboard, path: 'companies', group: 'Comercial', adminOnly: true },
-    { name: 'Admin SaaS', icon: Sparkles, path: 'admin', group: 'Comercial', adminOnly: true },
-    { name: 'Analise', icon: Activity, path: 'analytics', group: 'Comercial' },
-    { name: 'Vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
-    { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
-    { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
-    { name: 'Estoque', icon: Boxes, path: 'inventory', group: 'Operacao' },
-    { name: 'Integracoes', icon: Plug, path: 'integrations', group: 'Operacao', devOnly: true },
-    { name: 'Chat / Suporte', icon: MessageCircle, path: 'chat', group: 'Sistema' },
-    { name: 'Planos', icon: CreditCard, path: 'settings', group: 'Sistema', adminOnly: true },
-    { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema' }
-  ];
+  const menuItems: SidebarMenuItem[] = role === 'ADMIN'
+    ? [
+      { name: 'Dashboard', icon: LayoutDashboard, path: 'admin', group: 'Comercial', adminOnly: true },
+      { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
+      { name: 'Pipelines', icon: KanbanSquare, path: 'pipeline', group: 'Comercial', adminOnly: true },
+      { name: 'Tarefas', icon: Activity, path: 'admin', group: 'Comercial', adminOnly: true },
+      { name: 'Agenda', icon: BarChart3, path: 'sales', group: 'Comercial', adminOnly: true },
+      { name: 'Financeiro', icon: DollarSign, path: 'analytics', group: 'Comercial', adminOnly: true },
+      { name: 'Servicos', icon: Package, path: 'products', group: 'Operacao', adminOnly: true },
+      { name: 'Orcamentos', icon: CreditCard, path: 'sales', group: 'Operacao', adminOnly: true },
+      { name: 'Briefings', icon: Sparkles, path: 'companies', group: 'Operacao', adminOnly: true },
+      { name: 'Paginas', icon: LayoutDashboard, path: 'settings', group: 'Operacao', adminOnly: true },
+      { name: 'Equipe', icon: Users, path: 'clients', group: 'Sistema', adminOnly: true },
+      { name: 'WhatsApp', icon: MessageCircle, path: 'chat', group: 'Sistema', adminOnly: true },
+      { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema', adminOnly: true }
+    ]
+    : [
+      { name: 'Analise', icon: Activity, path: 'analytics', group: 'Comercial' },
+      { name: 'Vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
+      { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
+      { name: 'Estoque', icon: Boxes, path: 'inventory', group: 'Operacao' },
+      { name: 'Integracoes', icon: Plug, path: 'integrations', group: 'Operacao', devOnly: true },
+      { name: 'Chat / Suporte', icon: MessageCircle, path: 'chat', group: 'Sistema' },
+      { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema' }
+    ];
 
   const visibleMenuItems = menuItems.filter((item) => {
     if (item.adminOnly && role !== 'ADMIN') return false;
@@ -3933,6 +3945,15 @@ const Dashboard = () => {
     .filter((section) => section.items.length > 0);
 
   const handleMenuClick = (item: SidebarMenuItem) => {
+    if (role === 'ADMIN' && item.path === 'admin') {
+      const sectionByMenuName: Record<string, 'overview' | 'companies' | 'users' | 'plans' | 'support'> = {
+        Dashboard: 'overview',
+        Tarefas: 'support'
+      };
+
+      setAdminSection(sectionByMenuName[item.name] || 'overview');
+    }
+
     setActiveView(item.path);
     setActiveMenuName(item.name);
   };
@@ -4205,7 +4226,7 @@ const Dashboard = () => {
           {/* ── VIEW: PIPELINE ── */}
 
           {/* ── VIEW: PIPELINE ── */}
-          {activeView === 'pipeline' && false ? (
+          {activeView === 'pipeline' ? (
             <>
           <motion.section
             initial={{ opacity: 0, y: 18 }}
