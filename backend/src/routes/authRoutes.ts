@@ -314,7 +314,7 @@ router.post('/login', async (req, res) => {
 			fallbackUserName: String(userData.user.user_metadata?.name || '').trim() || null
 		});
 
-		if (ensuredUser.error || (ensuredUser.role !== 'ADMIN' && !ensuredUser.companyId)) {
+		if (ensuredUser.error || (ensuredUser.role === 'CLIENT' && !ensuredUser.companyId)) {
 			logSecurityEvent({
 				level: 'ERROR',
 				event: 'auth_login_user_sync_failed',
@@ -325,7 +325,7 @@ router.post('/login', async (req, res) => {
 				path: req.originalUrl,
 				statusCode: 500,
 				details: {
-					reason: ensuredUser.error || 'missing_company_for_non_admin'
+					reason: ensuredUser.error || 'missing_company_for_client'
 				}
 			});
 
