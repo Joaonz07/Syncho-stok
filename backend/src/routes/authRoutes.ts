@@ -228,7 +228,7 @@ router.post('/logout', async (_req, res) => {
 router.post('/login', async (req, res) => {
 	try {
 		const ip = getRequestIp(req.headers['x-forwarded-for'], req.ip);
-		const email = String(req.body?.email || '').trim();
+		const email = String(req.body?.email || '').trim().toLowerCase();
 		const password = String(req.body?.password || '');
 
 		if (!email || !password) {
@@ -250,7 +250,7 @@ router.post('/login', async (req, res) => {
 			});
 		}
 
-		if (!emailPattern.test(email) || password.length < 8) {
+		if (!emailPattern.test(email)) {
 			return res.status(400).json({ message: 'Credenciais em formato invalido.' });
 		}
 
