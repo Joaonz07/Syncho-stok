@@ -27,6 +27,14 @@ const formatCurrency = (value: number) =>
 const PDVPage = () => {
   const { role, isAuthenticated, loading } = useAuth();
   const token = getAccessToken();
+  const [uiTheme, setUiTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') {
+      return 'light';
+    }
+
+    return window.localStorage.getItem('dashboard-theme') === 'dark' ? 'dark' : 'light';
+  });
+  const isDarkTheme = uiTheme === 'dark';
 
   const [empresas, setEmpresas] = useState<Company[]>([]);
   const [empresaSelecionada, setEmpresaSelecionada] = useState('');
@@ -165,6 +173,32 @@ const PDVPage = () => {
     setItensCarrinho((atual) => atual.filter((item) => item.produto.id !== produtoId));
   };
 
+  const aplicarBaixaEstoqueLocal = (itensVendidos: CartItem[]) => {
+    const quantidadePorProduto = new Map<string, number>();
+
+    for (const item of itensVendidos) {
+      quantidadePorProduto.set(
+        item.produto.id,
+        Number(quantidadePorProduto.get(item.produto.id) || 0) + Number(item.quantidade || 0)
+      );
+    }
+
+    setProdutos((atual) =>
+      atual.map((produto) => {
+        const qtdVendida = Number(quantidadePorProduto.get(produto.id) || 0);
+
+        if (!qtdVendida) {
+          return produto;
+        }
+
+        return {
+          ...produto,
+          estoque: Math.max(0, Number(produto.estoque || 0) - qtdVendida)
+        };
+      })
+    );
+  };
+
   const finalizarVenda = async () => {
     if (!companyId) {
       setStatus('Selecione a empresa para finalizar a venda.');
@@ -176,7 +210,10 @@ const PDVPage = () => {
       return;
     }
 
+    const itensVendidos = [...itensCarrinho];
     setProcessandoVenda(true);
+    setModalPagamentoAberto(false);
+    setStatus('Processando venda...');
 
     try {
       await vendasService.criarVenda(
@@ -191,10 +228,10 @@ const PDVPage = () => {
         { token: token || undefined }
       );
 
+      aplicarBaixaEstoqueLocal(itensVendidos);
       setStatus('Venda finalizada com sucesso.');
       setItensCarrinho([]);
-      setModalPagamentoAberto(false);
-      await Promise.all([carregarProdutos(termoBusca), carregarVendasInsights()]);
+      void Promise.all([carregarProdutos(termoBusca), carregarVendasInsights()]);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Falha ao finalizar venda.');
     } finally {
@@ -229,6 +266,12 @@ const PDVPage = () => {
     return () => window.clearTimeout(timeoutId);
   }, [termoBusca]);
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('dashboard-theme', uiTheme);
+    }
+  }, [uiTheme]);
+
   if (loading) {
     return (
       <main className="grid min-h-screen place-items-center bg-slate-950 text-slate-100">
@@ -242,22 +285,64 @@ const PDVPage = () => {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4 sm:p-6">
+    <main className={[
+      'min-h-screen p-4 sm:p-6',
+      isDarkTheme
+        ? 'bg-[radial-gradient(circle_at_top,rgba(14,116,144,0.16),transparent_40%),linear-gradient(180deg,#020617,#0f172a)] text-slate-100'
+        : 'bg-slate-100 text-slate-900'
+    ].join(' ')}>
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4">
-        <header className="rounded-2xl border border-slate-200 bg-white p-4">
+        <header className={[
+          'rounded-2xl border p-4',
+          isDarkTheme ? 'border-white/10 bg-slate-900/60' : 'border-slate-200 bg-white'
+        ].join(' ')}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-cyan-100 p-2 text-cyan-700">
+              <div className={[
+                'rounded-xl p-2',
+                isDarkTheme ? 'bg-cyan-500/20 text-cyan-300' : 'bg-cyan-100 text-cyan-700'
+              ].join(' ')}>
                 <Store className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-2xl font-black text-slate-900">PDV Syncho</h1>
-                <p className="text-sm text-slate-500">Operacao de caixa em tela cheia, sem distracoes</p>
+                <h1 className={['text-2xl font-black', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>PDV Syncho</h1>
+                <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Operacao de caixa em tela cheia, sem distracoes</p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <Link to="/dashboard" className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
+              <div className={[
+                'flex items-center gap-1 rounded-xl border px-1 py-1 text-xs',
+                isDarkTheme ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-100'
+              ].join(' ')}>
+                <button
+                  type="button"
+                  onClick={() => setUiTheme('light')}
+                  className={[
+                    'rounded-lg px-3 py-1.5 font-semibold',
+                    uiTheme === 'light' ? 'bg-blue-600 text-white' : isDarkTheme ? 'text-slate-400' : 'text-slate-600'
+                  ].join(' ')}
+                >
+                  Claro
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUiTheme('dark')}
+                  className={[
+                    'rounded-lg px-3 py-1.5 font-semibold',
+                    uiTheme === 'dark' ? 'bg-cyan-500 text-slate-900' : isDarkTheme ? 'text-slate-400' : 'text-slate-600'
+                  ].join(' ')}
+                >
+                  Escuro
+                </button>
+              </div>
+
+              <Link to="/dashboard" className={[
+                'rounded-xl border px-4 py-2 text-sm font-semibold',
+                isDarkTheme
+                  ? 'border-white/10 bg-white/5 text-slate-200 hover:bg-white/10'
+                  : 'border-slate-200 bg-slate-50 text-slate-700'
+              ].join(' ')}>
                 Voltar ao dashboard
               </Link>
               <Button
@@ -272,11 +357,16 @@ const PDVPage = () => {
 
           {role === 'ADMIN' ? (
             <div className="mt-3 max-w-sm">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Empresa</label>
+              <label className={['mb-1 block text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Empresa</label>
               <select
                 value={empresaSelecionada}
                 onChange={(event) => setEmpresaSelecionada(event.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none"
+                className={[
+                  'w-full rounded-xl border px-3 py-2 text-sm outline-none',
+                  isDarkTheme
+                    ? 'border-white/10 bg-white/5 text-slate-100'
+                    : 'border-slate-200 bg-slate-50 text-slate-800'
+                ].join(' ')}
               >
                 <option value="">Selecione a empresa</option>
                 {empresas.map((empresa) => (
@@ -288,15 +378,20 @@ const PDVPage = () => {
         </header>
 
         {!companyId ? (
-          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-700">
+          <section className={[
+            'rounded-2xl border p-6 text-sm',
+            isDarkTheme
+              ? 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+              : 'border-amber-200 bg-amber-50 text-amber-700'
+          ].join(' ')}>
             Selecione uma empresa para iniciar o PDV.
           </section>
         ) : (
           <>
             <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
               <div className="space-y-3">
-                <ProductSearch termo={termoBusca} onTermoChange={setTermoBusca} />
-                <ProductList produtos={produtos} onAddProduto={adicionarAoCarrinho} />
+                <ProductSearch termo={termoBusca} onTermoChange={setTermoBusca} isDarkTheme={isDarkTheme} />
+                <ProductList produtos={produtos} onAddProduto={adicionarAoCarrinho} isDarkTheme={isDarkTheme} />
               </div>
 
               <Cart
@@ -304,6 +399,7 @@ const PDVPage = () => {
                 onIncrementar={incrementarQuantidade}
                 onDecrementar={decrementarQuantidade}
                 onRemover={removerItem}
+                isDarkTheme={isDarkTheme}
               />
             </section>
 
@@ -312,11 +408,16 @@ const PDVPage = () => {
               produtos={produtos.map((produto) => ({ ...produto, companyId }))}
               vendas={vendas.map((venda) => ({ ...venda, companyId }))}
               estoqueMinimo={10}
+              isDarkTheme={isDarkTheme}
             />
           </>
         )}
 
-        {status ? <p className="text-sm font-medium text-slate-700">{status}</p> : null}
+        {status ? (
+          <p className={['text-sm font-medium', isDarkTheme ? 'text-slate-300' : 'text-slate-700'].join(' ')}>
+            {status}
+          </p>
+        ) : null}
       </div>
 
       <PaymentModal

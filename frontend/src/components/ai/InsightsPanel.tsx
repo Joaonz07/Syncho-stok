@@ -9,6 +9,7 @@ type Props = {
   itensVenda?: AiItemVenda[];
   estoqueMinimo?: number;
   className?: string;
+  isDarkTheme?: boolean;
 };
 
 const getInsightTone = (insight: string) => {
@@ -42,7 +43,8 @@ const InsightsPanel = ({
   vendas,
   itensVenda = [],
   estoqueMinimo = 10,
-  className = ''
+  className = '',
+  isDarkTheme = false
 }: Props) => {
   const insights = useMemo(
     () =>
@@ -58,12 +60,13 @@ const InsightsPanel = ({
 
   return (
     <section className={[
-      'rounded-2xl border border-slate-200 bg-white p-4',
+      'rounded-2xl border p-4',
+      isDarkTheme ? 'border-white/10 bg-slate-900/60' : 'border-slate-200 bg-white',
       className
     ].join(' ')}>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-black text-slate-900">Insights IA</h2>
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Analise automatica</span>
+        <h2 className={['text-lg font-black', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>Insights IA</h2>
+        <span className={['text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Analise automatica</span>
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2">
