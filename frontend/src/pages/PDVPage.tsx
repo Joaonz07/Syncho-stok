@@ -450,18 +450,7 @@ const PDVPage = () => {
           </div>
         ) : (
           <>
-            <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className={[
-                'rounded-2xl border p-4',
-                isDarkTheme ? 'border-cyan-400/20 bg-slate-950/60' : 'border-slate-200 bg-white'
-              ].join(' ')}>
-                <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                  Receita total
-                </p>
-                <p className={['mt-1 text-2xl font-black', isDarkTheme ? 'text-cyan-100' : 'text-slate-800'].join(' ')}>
-                  {formatCurrency(Number(salesAnalysis?.totalRevenue || 0))}
-                </p>
-              </div>
+            <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-2">
               <div className={[
                 'rounded-2xl border p-4',
                 isDarkTheme ? 'border-cyan-400/20 bg-slate-950/60' : 'border-slate-200 bg-white'

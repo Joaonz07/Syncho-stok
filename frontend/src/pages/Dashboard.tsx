@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DragEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
@@ -42,22 +42,8 @@ import {
   Download,
   ReceiptText
 } from 'lucide-react';
-import {
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Area,
-  AreaChart,
-} from 'recharts';
+
+const AnalyticsCharts = lazy(() => import('../components/charts/AnalyticsCharts'));
 
 type LeadStatus =
   | 'NOVO_CONTATO'
@@ -432,27 +418,6 @@ const getCompanyIdFromJwt = (jwt: string) => {
   } catch (_error) {
     return '';
   }
-};
-
-const SalesLineTooltip = ({
-  active,
-  payload,
-  label
-}: {
-  active?: boolean;
-  payload?: Array<{ value?: number }>;
-  label?: string;
-}) => {
-  if (!active || !payload?.length) {
-    return null;
-  }
-
-  return (
-    <div className="rounded-lg border border-white/10 bg-slate-950/95 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md">
-      <p className="font-semibold text-slate-100">{label}</p>
-      <p className="mt-1 text-blue-300">{formatCurrency(Number(payload[0]?.value || 0))}</p>
-    </div>
-  );
 };
 
 const salesStages: Array<{ key: LeadStatus; label: string; shortLabel: string }> = [
@@ -1576,8 +1541,6 @@ const Dashboard = () => {
       })),
     [sourceShareData]
   );
-
-  const sourcePieColors = ['#3b82f6', '#06b6d4', '#0ea5e9', '#6366f1'];
 
   const sellerPerformanceData = useMemo(
     () =>
@@ -4085,7 +4048,7 @@ const Dashboard = () => {
     return <Navigate to="/login" replace />;
   }
 
-  const menuItems: SidebarMenuItem[] = role === 'ADMIN'
+  const menuItems: SidebarMenuItem[] = useMemo(() => (role === 'ADMIN'
     ? [
       { name: 'Dashboard', icon: LayoutDashboard, path: 'admin', group: 'Comercial', adminOnly: true },
       { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
@@ -4111,19 +4074,19 @@ const Dashboard = () => {
       { name: 'Integracoes', icon: Plug, path: 'integrations', group: 'Operacao', devOnly: true },
       { name: 'Chat / Suporte', icon: MessageCircle, path: 'chat', group: 'Sistema' },
       { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema' }
-    ];
+    ]), [role]);
 
-  const visibleMenuItems = menuItems.filter((item) => {
+  const visibleMenuItems = useMemo(() => menuItems.filter((item) => {
     if (item.adminOnly && role !== 'ADMIN') return false;
     if (item.devOnly && role !== 'DEV') return false;
     return true;
-  });
+  }), [menuItems, role]);
   const menuGroups: SidebarGroup[] = ['Comercial', 'Operacao', 'Sistema'];
-  const groupedMenuItems = menuGroups
+  const groupedMenuItems = useMemo(() => menuGroups
     .map((group) => ({ group, items: visibleMenuItems.filter((item) => item.group === group) }))
-    .filter((section) => section.items.length > 0);
+    .filter((section) => section.items.length > 0), [menuGroups, visibleMenuItems]);
 
-  const handleMenuClick = (item: SidebarMenuItem) => {
+  const handleMenuClick = useCallback((item: SidebarMenuItem) => {
     if (item.path === 'pdv') {
       setActiveMenuName(item.name);
       navigate('/pdv');
@@ -4141,7 +4104,7 @@ const Dashboard = () => {
 
     setActiveView(item.path);
     setActiveMenuName(item.name);
-  };
+  }, [navigate, role]);
 
   const integrationApiBaseUrl = `${getApiBaseUrl() || (typeof window !== 'undefined' ? window.location.origin : '')}/api/external`;
   const integrationTokenPreview = integrationApiConfig?.apiKey || 'SUA_API_KEY';
@@ -4457,85 +4420,26 @@ const Dashboard = () => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-bold text-white">Evolucao de vendas</h2>
-                  <p className="text-xs text-slate-400">Ultimos meses com atualizacao automatica</p>
+                  <h2 className="text-lg font-bold text-white">Resumo de vendas</h2>
+                  <p className="text-xs text-slate-400">Visao leve para manter navegação fluida</p>
                 </div>
               </div>
 
-              <div className="h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlySalesSeries}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.18)" />
-                    <XAxis dataKey="month" tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={{ stroke: 'rgba(148,163,184,0.3)' }} tickLine={false} />
-                    <YAxis
-                      tick={{ fill: '#94a3b8', fontSize: 12 }}
-                      axisLine={{ stroke: 'rgba(148,163,184,0.3)' }}
-                      tickLine={false}
-                      tickFormatter={(value) => `R$ ${Number(value / 1000).toFixed(0)}k`}
-                    />
-                    <Tooltip content={<SalesLineTooltip />} cursor={{ stroke: '#60a5fa', strokeOpacity: 0.3 }} />
-                    <Line
-                      type="monotone"
-                      dataKey="sales"
-                      stroke="#3b82f6"
-                      strokeWidth={3}
-                      dot={{ r: 4, fill: '#3b82f6', stroke: '#93c5fd', strokeWidth: 2 }}
-                      activeDot={{ r: 6, fill: '#60a5fa', stroke: '#dbeafe', strokeWidth: 2 }}
-                      animationDuration={1000}
-                      animationEasing="ease-out"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="mt-5 grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <article className="rounded-xl border border-white/10 bg-slate-950/55 p-4">
-                  <h3 className="text-sm font-semibold text-slate-100">Origem de clientes</h3>
-                  <div className="mt-3 h-44">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={sourcePieData} dataKey="value" nameKey="name" innerRadius={46} outerRadius={72} paddingAngle={4}>
-                          {sourcePieData.map((entry, index) => (
-                            <Cell key={`${entry.name}-${index}`} fill={sourcePieColors[index % sourcePieColors.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip contentStyle={{ background: '#020617', border: '1px solid rgba(148,163,184,0.25)', borderRadius: 12, color: '#fff' }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <p className="text-xs text-slate-400">Ultimo mes</p>
+                  <p className="mt-2 text-lg font-bold text-white">{String(monthlySalesSeries[monthlySalesSeries.length - 1]?.month || '-')}</p>
+                  <p className="text-xs text-blue-300">{formatCurrency(Number(monthlySalesSeries[monthlySalesSeries.length - 1]?.sales || 0))}</p>
                 </article>
-
                 <article className="rounded-xl border border-white/10 bg-slate-950/55 p-4">
-                  <h3 className="text-sm font-semibold text-slate-100">Performance</h3>
-                  <div className="mt-3 h-44">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={sellerPerformanceData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.14)" />
-                        <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                        <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                        <Tooltip contentStyle={{ background: '#020617', border: '1px solid rgba(148,163,184,0.25)', borderRadius: 12, color: '#fff' }} formatter={(value) => formatCurrency(Number(value || 0))} />
-                        <Bar dataKey="valor" fill="#3b82f6" radius={[6, 6, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <p className="text-xs text-slate-400">Variacao mensal</p>
+                  <p className="mt-2 text-lg font-bold text-white">{growthPercent >= 0 ? '+' : ''}{growthPercent.toFixed(1)}%</p>
+                  <p className="text-xs text-slate-400">Baseado na comparacao dos 2 ultimos meses</p>
                 </article>
-
                 <article className="rounded-xl border border-white/10 bg-slate-950/55 p-4">
-                  <h3 className="text-sm font-semibold text-slate-100">Historico recente</h3>
-                  <div className="mt-3 space-y-2">
-                    {(salesAnalysis?.recentSales || []).slice(0, 4).map((sale) => (
-                      <div key={sale.id} className="rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-xs">
-                        <div className="flex items-center justify-between gap-2 text-slate-200">
-                          <span>#{sale.id.slice(0, 8)}</span>
-                          <strong className="text-blue-300">{formatCurrency(Number(sale.total || 0))}</strong>
-                        </div>
-                        <p className="mt-1 text-slate-400">{formatDateTime(String(sale.createdAt || ''))}</p>
-                      </div>
-                    ))}
-                    {!((salesAnalysis?.recentSales || []).length) ? (
-                      <p className="text-xs text-slate-400">Sem vendas recentes no momento.</p>
-                    ) : null}
-                  </div>
+                  <p className="text-xs text-slate-400">Historico recente</p>
+                  <p className="mt-2 text-lg font-bold text-white">{(salesAnalysis?.recentSales || []).length}</p>
+                  <p className="text-xs text-slate-400">vendas recentes registradas</p>
                 </article>
               </div>
             </div>
@@ -5104,90 +5008,39 @@ const Dashboard = () => {
                   </div>
 
                   <div className="grid gap-4 xl:grid-cols-3">
-                    <div className={['xl:col-span-2 rounded-2xl border p-5', isDarkTheme ? 'border-blue-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(59,130,246,0.14)]' : 'border-slate-200 bg-white'].join(' ')}>
-                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Revenue Over Time</h3>
-                      <p className={['mb-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Evolucao mensal de receita recorrente</p>
-                      <ResponsiveContainer width="100%" height={220}>
-                        <LineChart data={adminNewCompaniesSeries}>
-                          <defs>
-                            <filter id="adminRevenueGlow" x="-50%" y="-50%" width="200%" height="200%">
-                              <feGaussianBlur stdDeviation="2.5" result="blur" />
-                              <feMerge>
-                                <feMergeNode in="blur" />
-                                <feMergeNode in="SourceGraphic" />
-                              </feMerge>
-                            </filter>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'} />
-                          <XAxis dataKey="month" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
-                          <YAxis tickFormatter={(v) => `R$${(Number(v) / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} width={56} />
-                          <Tooltip
-                            formatter={(v: unknown) => [formatCurrency(Number(v)), 'MRR']}
-                            contentStyle={{
-                              background: isDarkTheme ? '#0f172a' : '#fff',
-                              border: isDarkTheme ? '1px solid rgba(59,130,246,0.35)' : '1px solid #e2e8f0',
-                              borderRadius: '10px',
-                              color: isDarkTheme ? '#f8fafc' : '#0f172a',
-                              fontSize: 12
-                            }}
-                          />
-                          <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={3} filter="url(#adminRevenueGlow)" dot={{ fill: '#60a5fa', r: 3 }} />
-                        </LineChart>
-                      </ResponsiveContainer>
+                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-blue-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'].join(' ')}>
+                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Receita media mensal</h3>
+                      <p className={['mb-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Resumo sem grafico para melhor desempenho</p>
+                      <p className={['text-2xl font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-900'].join(' ')}>
+                        {formatCurrency(
+                          adminNewCompaniesSeries.length
+                            ? adminNewCompaniesSeries.reduce((acc, item) => acc + Number(item.revenue || 0), 0) / adminNewCompaniesSeries.length
+                            : 0
+                        )}
+                      </p>
                     </div>
-
-                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-purple-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(168,85,247,0.14)]' : 'border-slate-200 bg-white'].join(' ')}>
-                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Plan Distribution</h3>
-                      <p className={['mb-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Participacao por plano</p>
-                      <ResponsiveContainer width="100%" height={210}>
-                        <PieChart>
-                          <Pie data={adminPlanDistributionData} dataKey="value" nameKey="name" innerRadius={46} outerRadius={72} paddingAngle={4}>
-                            {adminPlanDistributionData.map((entry, index) => (
-                              <Cell key={entry.name} fill={['#3b82f6', '#8b5cf6', '#f43f5e'][index % 3]} style={{ filter: 'drop-shadow(0 0 5px rgba(59,130,246,0.25))' }} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(v: unknown) => [Number(v), 'Empresas']}
-                            contentStyle={{
-                              background: isDarkTheme ? '#0f172a' : '#fff',
-                              border: isDarkTheme ? '1px solid rgba(168,85,247,0.35)' : '1px solid #e2e8f0',
-                              borderRadius: '10px',
-                              color: isDarkTheme ? '#f8fafc' : '#0f172a',
-                              fontSize: 12
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
+                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-purple-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'].join(' ')}>
+                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Distribuicao de planos</h3>
+                      <div className="mt-3 space-y-2">
+                        {adminPlanDistributionData.map((plan) => (
+                          <div key={plan.name} className={['flex items-center justify-between rounded-lg px-3 py-2 text-xs', isDarkTheme ? 'bg-slate-900/70 text-slate-200' : 'bg-slate-100 text-slate-700'].join(' ')}>
+                            <span>{plan.name}</span>
+                            <strong>{plan.value}</strong>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-
-                  <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(34,211,238,0.14)]' : 'border-slate-200 bg-white'].join(' ')}>
-                    <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>New Companies Per Month</h3>
-                    <p className={['mb-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Entrada de novos clientes por mes</p>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={adminNewCompaniesSeries}>
-                        <defs>
-                          <linearGradient id="adminCompaniesBar" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#06b6d4" />
-                            <stop offset="100%" stopColor="#2563eb" />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'} vertical={false} />
-                        <XAxis dataKey="month" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
-                        <Tooltip
-                          formatter={(v: unknown) => [Number(v), 'Empresas']}
-                          contentStyle={{
-                            background: isDarkTheme ? '#0f172a' : '#fff',
-                            border: isDarkTheme ? '1px solid rgba(6,182,212,0.35)' : '1px solid #e2e8f0',
-                            borderRadius: '10px',
-                            color: isDarkTheme ? '#f8fafc' : '#0f172a',
-                            fontSize: 12
-                          }}
-                        />
-                        <Bar dataKey="companies" fill="url(#adminCompaniesBar)" radius={[8, 8, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'].join(' ')}>
+                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Novas empresas (6 meses)</h3>
+                      <div className="mt-3 space-y-2">
+                        {adminNewCompaniesSeries.slice(-6).map((entry) => (
+                          <div key={entry.month} className={['flex items-center justify-between rounded-lg px-3 py-2 text-xs', isDarkTheme ? 'bg-slate-900/70 text-slate-200' : 'bg-slate-100 text-slate-700'].join(' ')}>
+                            <span>{entry.month}</span>
+                            <strong>{entry.companies}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -7083,252 +6936,22 @@ const Dashboard = () => {
                 })}
               </div>
 
-              {/* Charts Row 1: Area Chart + Donut */}
-              <div className="grid gap-4 lg:grid-cols-3">
-                {/* Area Chart - Sales Trend */}
-                <motion.div
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.5, delay: 0.2 }}
-                  className={[
-                    'col-span-2 rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-blue-500/20 bg-[#0d1117] shadow-[0_0_22px_rgba(59,130,246,0.16)]' : 'border-slate-200 bg-white'
-                  ].join(' ')}
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <div>
-                      <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>Tendência de Vendas</h3>
-                      <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Evolução mensal do faturamento</p>
-                    </div>
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/15">
-                      <TrendingUp className="h-4 w-4 text-blue-400" />
-                    </div>
+              <Suspense
+                fallback={
+                  <div className={['rounded-2xl border p-5 text-sm', isDarkTheme ? 'border-white/10 bg-[#0d1117] text-slate-400' : 'border-slate-200 bg-white text-slate-500'].join(' ')}>
+                    Carregando graficos da analise...
                   </div>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <AreaChart data={monthlySalesSeries} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                      <defs>
-                        <linearGradient id="analyticsGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.35} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                        </linearGradient>
-                        <filter id="analyticsLineGlow" x="-50%" y="-50%" width="200%" height="200%">
-                          <feGaussianBlur stdDeviation="3" result="coloredBlur" />
-                          <feMerge>
-                            <feMergeNode in="coloredBlur" />
-                            <feMergeNode in="SourceGraphic" />
-                          </feMerge>
-                        </filter>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)'} />
-                      <XAxis dataKey="month" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} width={52} />
-                      <Tooltip
-                        contentStyle={{
-                          background: isDarkTheme ? '#0d1117' : '#fff',
-                          border: isDarkTheme ? '1px solid rgba(59,130,246,0.3)' : '1px solid #e2e8f0',
-                          borderRadius: '12px',
-                          boxShadow: '0 8px 30px rgba(0,0,0,0.35)',
-                          color: isDarkTheme ? '#f1f5f9' : '#1e293b',
-                          fontSize: 12
-                        }}
-                        formatter={(v: unknown) => [formatCurrency(Number(v)), 'Vendas']}
-                      />
-                      <Area type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2.5} fill="url(#analyticsGrad)" filter="url(#analyticsLineGlow)" dot={{ fill: '#3b82f6', r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: '#60a5fa', strokeWidth: 2, stroke: '#0d1117' }} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </motion.div>
-
-                {/* Donut Chart - Source Distribution */}
-                <motion.div
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.5, delay: 0.25 }}
-                  className={[
-                    'rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-purple-500/20 bg-[#0d1117] shadow-[0_0_22px_rgba(168,85,247,0.16)]' : 'border-slate-200 bg-white'
-                  ].join(' ')}
-                >
-                  <div className="mb-2 flex items-center justify-between">
-                    <div>
-                      <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>Origens</h3>
-                      <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Distribuição de leads</p>
-                    </div>
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/15">
-                      <BarChart3 className="h-4 w-4 text-purple-400" />
-                    </div>
-                  </div>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <PieChart>
-                      <Pie
-                        data={sourcePieData.length > 0 ? sourcePieData : [
-                          { name: 'Loja', value: 40 },
-                          { name: 'WhatsApp', value: 30 },
-                          { name: 'Direto', value: 20 },
-                          { name: 'Outros', value: 10 }
-                        ]}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={44}
-                        outerRadius={68}
-                        paddingAngle={3}
-                        startAngle={90}
-                        endAngle={-270}
-                      >
-                        {(sourcePieData.length > 0 ? sourcePieData : [{ name: 'Loja', value: 40 }, { name: 'WhatsApp', value: 30 }, { name: 'Direto', value: 20 }, { name: 'Outros', value: 10 }]).map((_entry, i) => (
-                          <Cell key={i} fill={['#3b82f6', '#a855f7', '#06b6d4', '#f43f5e'][i % 4]} stroke="rgba(255,255,255,0.08)" strokeWidth={1} style={{ filter: 'drop-shadow(0 0 6px rgba(59,130,246,0.25))' }} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          background: isDarkTheme ? '#0d1117' : '#fff',
-                          border: isDarkTheme ? '1px solid rgba(168,85,247,0.3)' : '1px solid #e2e8f0',
-                          borderRadius: '10px',
-                          fontSize: 12,
-                          color: isDarkTheme ? '#f1f5f9' : '#1e293b'
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1.5">
-                    {['Loja', 'WhatsApp', 'Direto', 'Outros'].map((label, i) => (
-                      <div key={label} className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ background: ['#3b82f6', '#a855f7', '#06b6d4', '#f43f5e'][i] }} />
-                        <span className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              </div>
-
-              {/* Charts Row 2: Products Bar + Sellers Bar */}
-              <div className="grid gap-4 lg:grid-cols-2">
-                {/* Top Products Bar */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.3 }}
-                  className={[
-                    'rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_22px_rgba(6,182,212,0.16)]' : 'border-slate-200 bg-white'
-                  ].join(' ')}
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <div>
-                      <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>Top Produtos</h3>
-                      <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Valor em estoque por produto</p>
-                    </div>
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/15">
-                      <Package className="h-4 w-4 text-cyan-400" />
-                    </div>
-                  </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart
-                      data={analyticsTopProducts.length > 0 ? analyticsTopProducts : [
-                        { name: 'Produto A', valor: 4500 },
-                        { name: 'Produto B', valor: 3200 },
-                        { name: 'Produto C', valor: 2800 },
-                        { name: 'Produto D', valor: 1900 }
-                      ]}
-                      margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
-                      barSize={28}
-                    >
-                      <defs>
-                        <linearGradient id="barGradCyan" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#06b6d4" />
-                          <stop offset="100%" stopColor="#0284c7" />
-                        </linearGradient>
-                        <filter id="barGlowCyan" x="-50%" y="-50%" width="200%" height="200%">
-                          <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-                          <feMerge>
-                            <feMergeNode in="coloredBlur" />
-                            <feMergeNode in="SourceGraphic" />
-                          </feMerge>
-                        </filter>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)'} vertical={false} />
-                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} width={48} />
-                      <Tooltip
-                        contentStyle={{
-                          background: isDarkTheme ? '#0d1117' : '#fff',
-                          border: isDarkTheme ? '1px solid rgba(6,182,212,0.3)' : '1px solid #e2e8f0',
-                          borderRadius: '12px',
-                          boxShadow: '0 8px 30px rgba(0,0,0,0.35)',
-                          color: isDarkTheme ? '#f1f5f9' : '#1e293b',
-                          fontSize: 12
-                        }}
-                        formatter={(v: unknown) => [formatCurrency(Number(v)), 'Valor']}
-                        cursor={{ fill: isDarkTheme ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' }}
-                      />
-                      <Bar dataKey="valor" fill="url(#barGradCyan)" filter="url(#barGlowCyan)" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </motion.div>
-
-                {/* Seller Performance Bar */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.35 }}
-                  className={[
-                    'rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-purple-500/20 bg-[#0d1117] shadow-[0_0_22px_rgba(168,85,247,0.16)]' : 'border-slate-200 bg-white'
-                  ].join(' ')}
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <div>
-                      <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>Desempenho por Vendedor</h3>
-                      <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Volume de vendas por membro</p>
-                    </div>
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/15">
-                      <Users className="h-4 w-4 text-purple-400" />
-                    </div>
-                  </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart
-                      data={sellerPerformanceData.length > 0 ? sellerPerformanceData : [
-                        { name: 'Carlos', valor: 18000 },
-                        { name: 'Ana', valor: 14500 },
-                        { name: 'Pedro', valor: 11200 },
-                        { name: 'Julia', valor: 8900 }
-                      ]}
-                      margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
-                      barSize={28}
-                      layout="vertical"
-                    >
-                      <defs>
-                        <linearGradient id="barGradPurple" x1="0" y1="0" x2="1" y2="0">
-                          <stop offset="0%" stopColor="#a855f7" />
-                          <stop offset="100%" stopColor="#ec4899" />
-                        </linearGradient>
-                        <filter id="barGlowPurple" x="-50%" y="-50%" width="200%" height="200%">
-                          <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-                          <feMerge>
-                            <feMergeNode in="coloredBlur" />
-                            <feMergeNode in="SourceGraphic" />
-                          </feMerge>
-                        </filter>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkTheme ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)'} horizontal={false} />
-                      <XAxis type="number" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
-                      <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: isDarkTheme ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} width={60} />
-                      <Tooltip
-                        contentStyle={{
-                          background: isDarkTheme ? '#0d1117' : '#fff',
-                          border: isDarkTheme ? '1px solid rgba(168,85,247,0.3)' : '1px solid #e2e8f0',
-                          borderRadius: '12px',
-                          boxShadow: '0 8px 30px rgba(0,0,0,0.35)',
-                          color: isDarkTheme ? '#f1f5f9' : '#1e293b',
-                          fontSize: 12
-                        }}
-                        formatter={(v: unknown) => [formatCurrency(Number(v)), 'Vendas']}
-                        cursor={{ fill: isDarkTheme ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' }}
-                      />
-                      <Bar dataKey="valor" fill="url(#barGradPurple)" filter="url(#barGlowPurple)" radius={[0, 6, 6, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </motion.div>
-              </div>
+                }
+              >
+                <AnalyticsCharts
+                  isDarkTheme={isDarkTheme}
+                  monthlySalesSeries={monthlySalesSeries}
+                  sourcePieData={sourcePieData}
+                  analyticsTopProducts={analyticsTopProducts}
+                  sellerPerformanceData={sellerPerformanceData}
+                  formatCurrency={formatCurrency}
+                />
+              </Suspense>
 
               {/* AI Insights Card */}
               <motion.div
