@@ -1,85 +1,94 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { apiFetch as fetch } from '../lib/api';
-import { clearSession, getAccessToken, getCompanyId, getRole, saveSession } from '../lib/session';
+import { authService, type AuthUser, type TenantRole } from '../services/authService';
+import type { Empresa } from '../services/empresaService';
+import { clearSession, getAccessToken, saveSession } from '../lib/session';
+
+type LegacyRole = 'ADMIN' | 'DEV' | 'CLIENT';
 
 type LoginResult = {
   success: boolean;
   message?: string;
-  role?: 'ADMIN' | 'DEV' | 'CLIENT';
+  role?: LegacyRole;
+};
+
+type RegisterEmpresaPayload = {
+  empresaNome: string;
+  empresaEmail: string;
+  usuarioNome: string;
+  email: string;
+  senha: string;
+  remember?: boolean;
 };
 
 type AuthContextValue = {
   loading: boolean;
-  role: 'ADMIN' | 'DEV' | 'CLIENT' | null;
-  companyId: string | null;
   isAuthenticated: boolean;
+  user: AuthUser | null;
+  empresa: Empresa | null;
+  role: LegacyRole | null;
+  companyId: string | null;
+  login: (email: string, senha: string, options?: { remember?: boolean }) => Promise<LoginResult>;
+  logout: () => Promise<void>;
+  registerEmpresa: (payload: RegisterEmpresaPayload) => Promise<LoginResult>;
   signIn: (email: string, password: string, options?: { remember?: boolean }) => Promise<LoginResult>;
   signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const normalizeRole = (value: unknown): 'ADMIN' | 'DEV' | 'CLIENT' => {
-  const normalized = String(value || 'CLIENT').toUpperCase();
-  return normalized === 'ADMIN' ? 'ADMIN' : normalized === 'DEV' ? 'DEV' : 'CLIENT';
+const toLegacyRole = (role: TenantRole): LegacyRole => {
+  return role === 'admin' ? 'ADMIN' : 'CLIENT';
 };
 
-const safeParseJson = async (response: Response) => {
-  try {
-    return await response.json();
-  } catch (_error) {
-    return null;
-  }
-};
+const toTenantRole = (value: unknown): TenantRole => {
+  const normalized = String(value || '').toLowerCase();
 
-const getProfileFromApi = async (accessToken: string) => {
-  const response = await fetch('/api/dashboard/me', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    }
-  });
-
-  if (!response.ok) {
-    return { role: 'CLIENT' as const, companyId: null as string | null };
+  if (normalized === 'admin' || normalized === 'dev') {
+    return 'admin';
   }
 
-  const result = await response.json();
-  const user = result?.user || {};
-
-  return {
-    role: normalizeRole(user.role),
-    companyId: (String(user.companyId || '').trim() || null) as string | null
-  };
+  return 'funcionario';
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [accessToken, setAccessToken] = useState('');
-  const [role, setRole] = useState<'ADMIN' | 'DEV' | 'CLIENT' | null>(null);
-  const [companyId, setCompanyId] = useState<string | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [empresa, setEmpresa] = useState<Empresa | null>(null);
+  const [role, setRole] = useState<LegacyRole | null>(null);
 
-  const syncSessionState = async (token: string) => {
-    const normalizedToken = String(token || '').trim();
+  const clearAuthState = () => {
+    clearSession();
+    setAccessToken('');
+    setUser(null);
+    setEmpresa(null);
+    setRole(null);
+  };
 
-    if (!normalizedToken) {
-      setAccessToken('');
-      clearSession();
-      setRole(null);
-      setCompanyId(null);
-      return;
-    }
+  const applySession = (
+    payload: {
+      accessToken: string;
+      user: AuthUser;
+      empresa: Empresa;
+    },
+    persist = true
+  ) => {
+    const legacyRole = toLegacyRole(payload.user.role);
 
-    const profile = await getProfileFromApi(normalizedToken);
-    setAccessToken(normalizedToken);
-    setRole(profile.role);
-    setCompanyId(profile.companyId);
+    setAccessToken(payload.accessToken);
+    setUser(payload.user);
+    setEmpresa(payload.empresa);
+    setRole(legacyRole);
 
-    saveSession({
-      accessToken: normalizedToken,
-      role: profile.role,
-      companyId: profile.companyId
-    });
+    saveSession(
+      {
+        accessToken: payload.accessToken,
+        role: legacyRole,
+        companyId: payload.user.empresaId
+      },
+      persist
+    );
   };
 
   useEffect(() => {
@@ -87,21 +96,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const storedToken = getAccessToken();
 
       if (!storedToken) {
-        clearSession();
-        setAccessToken('');
-        setRole(null);
-        setCompanyId(null);
+        clearAuthState();
         setLoading(false);
         return;
       }
 
       try {
-        await syncSessionState(storedToken);
+        const session = await authService.getSessionFromToken(storedToken);
+
+        if (!session) {
+          clearAuthState();
+          setLoading(false);
+          return;
+        }
+
+        applySession(
+          {
+            accessToken: session.accessToken,
+            user: session.user,
+            empresa: session.empresa
+          },
+          true
+        );
       } catch (_error) {
-        clearSession();
-        setAccessToken('');
-        setRole(null);
-        setCompanyId(null);
+        clearAuthState();
       } finally {
         setLoading(false);
       }
@@ -110,86 +128,99 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void init();
   }, []);
 
-  const signIn = async (
+  const login = async (
     email: string,
-    password: string,
+    senha: string,
     options?: { remember?: boolean }
   ): Promise<LoginResult> => {
-    const persistSession = options?.remember ?? true;
+    const remember = options?.remember ?? true;
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password })
-      });
+      const session = await authService.login({ email: email.trim(), senha });
 
-      const result = await safeParseJson(response);
-
-      if (!response.ok) {
-        return {
-          success: false,
-          message: result?.message || 'Falha no login.'
-        };
-      }
-
-      const nextAccessToken = String(result?.session?.access_token || '').trim();
-
-      if (!nextAccessToken) {
-        return {
-          success: false,
-          message: 'Sessao invalida retornada pelo servidor.'
-        };
-      }
-
-      const resolvedRole = normalizeRole(result?.role || getRole());
-      const resolvedCompanyId = String(result?.companyId || getCompanyId() || '').trim() || null;
-
-      setAccessToken(nextAccessToken);
-      setRole(resolvedRole);
-      setCompanyId(resolvedCompanyId);
-
-      saveSession({
-        accessToken: nextAccessToken,
-        role: resolvedRole,
-        companyId: resolvedCompanyId
-      }, persistSession);
+      applySession(
+        {
+          accessToken: session.accessToken,
+          user: session.user,
+          empresa: session.empresa
+        },
+        remember
+      );
 
       return {
         success: true,
-        role: resolvedRole
+        role: toLegacyRole(session.user.role)
       };
-    } catch (_error) {
+    } catch (error) {
       return {
         success: false,
-        message: 'Erro de rede ao fazer login.'
+        message: error instanceof Error ? error.message : 'Falha no login.'
       };
     }
   };
 
-  const signOut = async () => {
+  const registerEmpresa = async (payload: RegisterEmpresaPayload): Promise<LoginResult> => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-    } catch (_error) {
-      // ignora erro de rede no logout e limpa sessao local mesmo assim
-    }
+      const session = await authService.registerEmpresa({
+        empresaNome: payload.empresaNome,
+        empresaEmail: payload.empresaEmail,
+        usuarioNome: payload.usuarioNome,
+        email: payload.email,
+        senha: payload.senha
+      });
 
-    clearSession();
-    setAccessToken('');
-    setRole(null);
-    setCompanyId(null);
+      applySession(
+        {
+          accessToken: session.accessToken,
+          user: session.user,
+          empresa: session.empresa
+        },
+        payload.remember ?? true
+      );
+
+      return {
+        success: true,
+        role: toLegacyRole(session.user.role)
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Falha ao registrar empresa.'
+      };
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await authService.logout(accessToken);
+    } finally {
+      clearAuthState();
+    }
+  };
+
+  const signIn = async (email: string, password: string, options?: { remember?: boolean }) => {
+    return login(email, password, options);
+  };
+
+  const signOut = async () => {
+    await logout();
   };
 
   const value = useMemo<AuthContextValue>(
     () => ({
       loading,
-      role,
-      companyId,
       isAuthenticated: Boolean(accessToken),
+      user,
+      empresa,
+      role,
+      companyId: user?.empresaId || empresa?.id || null,
+      login,
+      logout,
+      registerEmpresa,
       signIn,
       signOut
     }),
-    [loading, accessToken, role, companyId]
+    [loading, accessToken, user, empresa, role]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -203,4 +234,15 @@ export const useAuth = () => {
   }
 
   return context;
+};
+
+export const useTenantScope = () => {
+  const { user, empresa, companyId, role } = useAuth();
+
+  return {
+    empresaId: String(companyId || '').trim(),
+    userId: String(user?.id || '').trim(),
+    tenantRole: toTenantRole(role),
+    empresa
+  };
 };

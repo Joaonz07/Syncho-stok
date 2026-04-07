@@ -1,12 +1,11 @@
 import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { apiFetch as fetch } from '../lib/api';
 import { redirectByRole } from '../lib/session';
 import { useAuth } from '../context/AuthContext';
 
 const RegisterPage = () => {
-  const { signIn } = useAuth();
+  const { registerEmpresa } = useAuth();
   const [name, setName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [email, setEmail] = useState('');
@@ -38,33 +37,22 @@ const RegisterPage = () => {
     setStatus('Criando conta...');
 
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          companyName: companyName.trim(),
-          email: email.trim(),
-          password
-        })
+      const result = await registerEmpresa({
+        empresaNome: companyName.trim(),
+        empresaEmail: email.trim(),
+        usuarioNome: name.trim(),
+        email: email.trim(),
+        senha: password,
+        remember: true
       });
 
-      const result = await response.json();
-
-      if (!response.ok) {
+      if (!result.success) {
         setStatus(result.message || 'Falha ao criar conta.');
         return;
       }
 
-      const loginResult = await signIn(email.trim(), password);
-
-      if (!loginResult.success) {
-        setStatus('Conta criada, mas nao foi possivel autenticar automaticamente. Faca login.');
-        return;
-      }
-
       setStatus('Conta criada com sucesso. Redirecionando...');
-      redirectByRole('CLIENT');
+      redirectByRole(result.role || 'CLIENT');
     } catch (_error) {
       setStatus('Erro de rede ao cadastrar.');
     } finally {

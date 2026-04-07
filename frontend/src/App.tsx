@@ -7,7 +7,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const PlansPage = lazy(() => import('./pages/PlansPage'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
-const PDVPage = lazy(() => import('./pages/PDVPage'));
+const PDVPage = lazy(() => import('./app/pdv/PDVPage'));
 
 const RouteLoader = () => (
   <main className="saas-page grid place-items-center p-6 text-slate-100">
