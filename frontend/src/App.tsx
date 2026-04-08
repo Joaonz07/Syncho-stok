@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
+import UpdateBanner from './components/desktop/UpdateBanner';
 import { useAuth } from './context/AuthContext';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -35,31 +36,34 @@ function RootRedirect() {
 
 function App() {
   return (
-    <Suspense fallback={<RouteLoader />}>
-      <Routes>
-        <Route path="/" element={<RootRedirect />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/plans" element={<PlansPage />} />
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/pdv"
-          element={
-            <ProtectedRoute>
-              <PDVPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="*" element={<RootRedirect />} />
-      </Routes>
-    </Suspense>
+    <>
+      <UpdateBanner />
+      <Suspense fallback={<RouteLoader />}>
+        <Routes>
+          <Route path="/" element={<RootRedirect />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/plans" element={<PlansPage />} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pdv"
+            element={
+              <ProtectedRoute>
+                <PDVPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<RootRedirect />} />
+        </Routes>
+      </Suspense>
+    </>
   );
 }
 

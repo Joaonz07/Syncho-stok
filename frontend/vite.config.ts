@@ -26,6 +26,7 @@ export default defineConfig(({ mode }) => {
   const apiTarget = env.VITE_API_URL || 'http://localhost:5000';
 
   return {
+    base: './',
     plugins: [react()],
     build: {
       rollupOptions: {
@@ -36,6 +37,8 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: '0.0.0.0',
+      port: 5173,
+      strictPort: true,
       proxy: {
         '/api': {
           target: apiTarget,
