@@ -217,6 +217,11 @@ type Toast = {
   message: string;
 };
 
+type SupportFeedback = {
+  type: 'success' | 'error';
+  message: string;
+};
+
 type IntegrationEvent = 'sale.created' | 'product.updated' | 'stock.low';
 
 type IntegrationWebhook = {
@@ -825,8 +830,10 @@ const Dashboard = () => {
   const [settingsPasswordLoading, setSettingsPasswordLoading] = useState(false);
   const [supportRequests, setSupportRequests] = useState<SupportRequest[]>([]);
   const [supportLoading, setSupportLoading] = useState(false);
+  const [supportSubmitting, setSupportSubmitting] = useState(false);
   const [supportSubject, setSupportSubject] = useState('');
   const [supportMessage, setSupportMessage] = useState('');
+  const [supportFeedback, setSupportFeedback] = useState<SupportFeedback | null>(null);
   const [supportDrafts, setSupportDrafts] = useState<
     Record<string, { status: SupportRequestStatus; adminResponse: string }>
   >({});
@@ -2556,16 +2563,19 @@ const Dashboard = () => {
 
     if (!targetCompanyId) {
       setStatus('Empresa nao identificada para abrir suporte.');
+      setSupportFeedback({ type: 'error', message: 'Empresa nao identificada para abrir suporte.' });
       return;
     }
 
     if (!supportMessage.trim() || supportMessage.trim().length < 4) {
       setStatus('Descreva melhor o que deseja alterar para enviar ao admin (minimo de 4 caracteres).');
+      setSupportFeedback({ type: 'error', message: 'Descreva melhor sua solicitacao antes de enviar.' });
       showToast('Mensagem de suporte muito curta');
       return;
     }
 
-    setSupportLoading(true);
+    setSupportSubmitting(true);
+    setSupportFeedback(null);
 
     try {
       const response = await fetch('/api/dashboard/support-requests', {
@@ -2584,12 +2594,17 @@ const Dashboard = () => {
 
       if (!response.ok) {
         setStatus(result.message || 'Falha ao enviar solicitacao de suporte.');
+        setSupportFeedback({
+          type: 'error',
+          message: String(result.message || 'Nao foi possivel enviar seu chamado. Tente novamente.')
+        });
         return;
       }
 
       setSupportSubject('');
       setSupportMessage('');
       setStatus('Solicitacao enviada para o admin com sucesso.');
+      setSupportFeedback({ type: 'success', message: 'Chamado enviado com sucesso. Nossa equipe foi notificada.' });
       showToast('Solicitacao enviada');
       const createdRequestId = String(result?.request?.id || '').trim() || null;
       await fetchSupportRequests();
@@ -2600,8 +2615,9 @@ const Dashboard = () => {
       }
     } catch (_error) {
       setStatus('Erro de rede ao enviar solicitacao de suporte.');
+      setSupportFeedback({ type: 'error', message: 'Erro de rede ao enviar seu chamado. Tente novamente em instantes.' });
     } finally {
-      setSupportLoading(false);
+      setSupportSubmitting(false);
     }
   };
 
@@ -6162,11 +6178,23 @@ const Dashboard = () => {
                         <button
                           type="button"
                           onClick={createSupportRequest}
-                          disabled={supportLoading}
+                          disabled={supportSubmitting}
                           className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 py-2 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
                         >
-                          {supportLoading ? 'Enviando...' : 'Enviar chamado'}
+                          {supportSubmitting ? 'Enviando...' : 'Enviar chamado'}
                         </button>
+                        {supportFeedback ? (
+                          <p
+                            className={[
+                              'text-sm',
+                              supportFeedback.type === 'success'
+                                ? isDarkTheme ? 'text-emerald-300' : 'text-emerald-700'
+                                : isDarkTheme ? 'text-rose-300' : 'text-rose-700'
+                            ].join(' ')}
+                          >
+                            {supportFeedback.message}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   ) : null}

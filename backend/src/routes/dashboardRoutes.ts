@@ -2300,18 +2300,16 @@ router.post('/support-requests', requireAuth, async (req, res) => {
     });
   }
 
-  try {
-    await sendSupportRequestNotification({
-      requestId: requestId || '-',
-      companyId,
-      requesterName: req.authUser.email.split('@')[0],
-      requesterEmail: req.authUser.email,
-      subject,
-      message
-    });
-  } catch (emailError) {
+  void sendSupportRequestNotification({
+    requestId: requestId || '-',
+    companyId,
+    requesterName: req.authUser.email.split('@')[0],
+    requesterEmail: req.authUser.email,
+    subject,
+    message
+  }).catch((emailError) => {
     console.error('Erro ao enviar notificacao de suporte por e-mail:', emailError);
-  }
+  });
 
   return res.status(201).json({
     message: 'Solicitacao enviada para o admin com sucesso.',
