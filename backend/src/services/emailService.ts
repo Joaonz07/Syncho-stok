@@ -13,47 +13,30 @@ type SupportEmailPayload = {
   message: string;
 };
 
-// Cache de resoluções DNS para evitar múltiplas buscas
-const dnsCache = new Map<string, { ip: string; timestamp: number }>();
-const DNS_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
-
-const resolveHostToIPv4 = async (host: string): Promise<string> => {
-  const cached = dnsCache.get(host);
-  if (cached && Date.now() - cached.timestamp < DNS_CACHE_TTL) {
-    return cached.ip;
-  }
-
-  try {
-    const addresses = await dns.promises.resolve4(host);
-    if (addresses.length === 0) {
-      console.warn(`[support-email] nenhum endereco IPv4 resolvido para ${host}`);
-      return host;
-    }
-    
-    const ip = addresses[0];
-    dnsCache.set(host, { ip, timestamp: Date.now() });
-    console.debug(`[support-email] resolvido ${host} -> ${ip}`);
-    return ip;
-  } catch (error) {
-    console.warn(`[support-email] erro ao resolver IPv4 de ${host}:`, error);
-    return host;
-  }
-};
-
 const getTransporter = (host: string, port: number, user: string, pass: string) => {
+  console.info('[support-email] configurando transporte', {
+    host,
+    port,
+    user: user.substring(0, 5) + '***',
+    secure: port === 465,
+    requireTLS: port !== 465
+  });
+
   const transportOptions: SMTPTransport.Options = {
     host,
     port,
     secure: port === 465,
     requireTLS: port !== 465,
-    name: 'syncho.cloud',
     auth: { user, pass },
     tls: {
+      rejectUnauthorized: false,
       servername: process.env.SMTP_HOST || host
     },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000
+    connectionTimeout: 30000, // 30s
+    greetingTimeout: 30000, // 30s
+    socketTimeout: 45000, // 45s
+    logger: true,
+    debug: true
   };
 
   return nodemailer.createTransport(transportOptions);
@@ -61,18 +44,26 @@ const getTransporter = (host: string, port: number, user: string, pass: string) 
 
 export const sendSupportRequestNotification = async (payload: SupportEmailPayload) => {
   const host = String(process.env.SMTP_HOST || '').trim();
-  const port = Number(process.env.SMTP_PORT || 587);
+  let port = Number(process.env.SMTP_PORT || 587);
   const user = String(process.env.SMTP_USER || '').trim();
   const pass = String(process.env.SMTP_PASS || '').trim();
 
-  if (!host || !port || !user || !pass) {
-    console.warn('[support-email] SMTP nao configurado; notificacao por e-mail ignorada.');
+  if (!host || !user || !pass) {
+    console.warn('[support-email] SMTP nao configurado; notificacao por e-mail ignorada.', {
+      hostConfigured: !!host,
+      userConfigured: !!user,
+      passConfigured: !!pass
+    });
     return;
   }
 
-  // Resolve host para IPv4 explicitamente
-  const ipv4Host = await resolveHostToIPv4(host);
-  const transporter = getTransporter(ipv4Host, port, user, pass);
+  console.info('[support-email] iniciando envio', {
+    requestId: payload.requestId,
+    host,
+    port
+  });
+
+  const transporter = getTransporter(host, port, user, pass);
 
   const notifyEmail = String(process.env.SUPPORT_NOTIFY_EMAIL || 'contato@syncho.cloud').trim();
   const fromEmail = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
@@ -93,33 +84,39 @@ export const sendSupportRequestNotification = async (payload: SupportEmailPayloa
     <p>${payload.message.replace(/\n/g, '<br/>')}</p>
   `;
 
-  const result = await transporter.sendMail({
-    from: `${fromName} <${fromEmail}>`,
-    to: notifyEmail,
-    replyTo: payload.requesterEmail,
-    subject: `[Syncho Stok] Novo suporte: ${payload.subject}`,
-    text: [
-      'Novo chamado de suporte',
-      `ID: ${payload.requestId}`,
-      `Empresa: ${payload.companyId}`,
-      `Solicitante: ${payload.requesterName} (${payload.requesterEmail})`,
-      `Assunto: ${payload.subject}`,
-      '',
-      payload.message
-    ].join('\n'),
-    html
-  });
+  try {
+    const result = await transporter.sendMail({
+      from: `${fromName} <${fromEmail}>`,
+      to: notifyEmail,
+      replyTo: payload.requesterEmail,
+      subject: `[Syncho Stok] Novo suporte: ${payload.subject}`,
+      text: [
+        'Novo chamado de suporte',
+        `ID: ${payload.requestId}`,
+        `Empresa: ${payload.companyId}`,
+        `Solicitante: ${payload.requesterName} (${payload.requesterEmail})`,
+        `Assunto: ${payload.subject}`,
+        '',
+        payload.message
+      ].join('\n'),
+      html
+    });
 
-  console.info('[support-email] envio processado', {
-    requestId: payload.requestId,
-    to: notifyEmail,
-    accepted: result.accepted,
-    rejected: result.rejected,
-    response: result.response,
-    messageId: result.messageId
-  });
-
-  if ((!result.accepted || result.accepted.length === 0) && result.rejected && result.rejected.length > 0) {
-    throw new Error(`Destino rejeitado pelo provedor SMTP: ${result.rejected.join(', ')}`);
+    console.info('[support-email] ✅ envio processado com sucesso', {
+      requestId: payload.requestId,
+      to: notifyEmail,
+      accepted: result.accepted,
+      messageId: result.messageId
+    });
+  } catch (error: any) {
+    console.error('[support-email] ❌ falha ao enviar', {
+      requestId: payload.requestId,
+      erro: error?.message,
+      code: error?.code,
+      command: error?.command,
+      responseCode: error?.responseCode
+    });
+    
+    throw error;
   }
 };
