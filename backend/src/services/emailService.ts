@@ -40,6 +40,12 @@ export const sendSupportRequestNotification = async (payload: SupportEmailPayloa
 
   const notifyEmail = String(process.env.SUPPORT_NOTIFY_EMAIL || 'contato@syncho.cloud').trim();
   const fromEmail = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
+  const fromName = String(process.env.SMTP_FROM_NAME || 'Syncho Cloud').trim() || 'Syncho Cloud';
+
+  if (!notifyEmail) {
+    console.warn('[support-email] SUPPORT_NOTIFY_EMAIL nao configurado; notificacao ignorada.');
+    return;
+  }
 
   const html = `
     <h2>Novo chamado de suporte</h2>
@@ -51,9 +57,10 @@ export const sendSupportRequestNotification = async (payload: SupportEmailPayloa
     <p>${payload.message.replace(/\n/g, '<br/>')}</p>
   `;
 
-  await transporter.sendMail({
-    from: fromEmail,
+  const result = await transporter.sendMail({
+    from: `${fromName} <${fromEmail}>`,
     to: notifyEmail,
+    replyTo: payload.requesterEmail,
     subject: `[Syncho Stok] Novo suporte: ${payload.subject}`,
     text: [
       'Novo chamado de suporte',
@@ -66,4 +73,17 @@ export const sendSupportRequestNotification = async (payload: SupportEmailPayloa
     ].join('\n'),
     html
   });
+
+  console.info('[support-email] envio processado', {
+    requestId: payload.requestId,
+    to: notifyEmail,
+    accepted: result.accepted,
+    rejected: result.rejected,
+    response: result.response,
+    messageId: result.messageId
+  });
+
+  if ((!result.accepted || result.accepted.length === 0) && result.rejected && result.rejected.length > 0) {
+    throw new Error(`Destino rejeitado pelo provedor SMTP: ${result.rejected.join(', ')}`);
+  }
 };
