@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { autoUpdater } from 'electron-updater';
+import updaterPackage from 'electron-updater';
+
+const { autoUpdater } = updaterPackage;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,6 +68,41 @@ const isValidUpdateVersion = (nextVersion) => {
   return compareVersions(nextParsed, currentParsed) >= 0;
 };
 
+const mapUpdaterErrorStatus = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+
+  if (
+    message.includes('no published versions') ||
+    message.includes('cannot find channel') ||
+    message.includes('latest.yml') ||
+    message.includes('404')
+  ) {
+    return {
+      status: 'not-available',
+      message: 'Atualizacoes automaticas ainda nao configuradas.'
+    };
+  }
+
+  if (
+    message.includes('net::err') ||
+    message.includes('network') ||
+    message.includes('socket hang up') ||
+    message.includes('timeout') ||
+    message.includes('econnrefused') ||
+    message.includes('enotfound')
+  ) {
+    return {
+      status: 'not-available',
+      message: 'Atualizacoes indisponiveis no momento.'
+    };
+  }
+
+  return {
+    status: 'error',
+    message: 'Erro ao atualizar o aplicativo.'
+  };
+};
+
 const checkForUpdatesSafe = async () => {
   if (isDev) {
     return;
@@ -78,11 +115,8 @@ const checkForUpdatesSafe = async () => {
 
   try {
     await autoUpdater.checkForUpdates();
-  } catch (_error) {
-    sendUpdateStatus({
-      status: 'error',
-      message: 'Falha ao verificar atualizacoes.'
-    });
+  } catch (error) {
+    sendUpdateStatus(mapUpdaterErrorStatus(error));
   }
 };
 
@@ -154,11 +188,8 @@ const setupAutoUpdater = () => {
     });
   });
 
-  autoUpdater.on('error', () => {
-    sendUpdateStatus({
-      status: 'error',
-      message: 'Erro ao atualizar o aplicativo.'
-    });
+  autoUpdater.on('error', (error) => {
+    sendUpdateStatus(mapUpdaterErrorStatus(error));
   });
 
   ipcMain.on('updater:install-now', () => {

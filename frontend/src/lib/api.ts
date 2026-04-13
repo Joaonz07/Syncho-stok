@@ -2,9 +2,10 @@ const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 
 export const getApiBaseUrl = () => {
   const configuredUrl = String(import.meta.env.VITE_API_URL || '').trim();
+  const isDesktop = typeof window !== 'undefined' && Boolean(window.synchoDesktop?.isDesktop);
 
   // Em produção (não DEV), ignorar localhost - usar origem atual
-  if (!import.meta.env.DEV && configuredUrl.includes('localhost')) {
+  if (!import.meta.env.DEV && configuredUrl.includes('localhost') && !isDesktop) {
     return trimTrailingSlash(window.location.origin);
   }
 

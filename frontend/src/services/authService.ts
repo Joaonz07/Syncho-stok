@@ -44,6 +44,21 @@ const makeId = () => {
 
 const makeToken = () => `mock-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+class BackendResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BackendResponseError';
+  }
+}
+
+const parseJsonSafe = async (response: Response) => {
+  try {
+    return await response.json();
+  } catch (_error) {
+    return null;
+  }
+};
+
 const getStorage = (): AuthStorage => {
   if (typeof window === 'undefined') {
     return defaultStorage;
@@ -163,7 +178,7 @@ export const authService = {
         })
       });
 
-      const result = await response.json();
+      const result = await parseJsonSafe(response);
 
       if (response.ok) {
         const loginResult = await this.login({ email, senha });
@@ -171,11 +186,16 @@ export const authService = {
         if (loginResult) {
           return loginResult;
         }
-      } else if (result?.message) {
-        throw new Error(String(result.message));
+      } else {
+        const backendMessage = String(result?.message || '').trim();
+        throw new BackendResponseError(backendMessage || 'Falha ao registrar empresa.');
       }
-    } catch (_error) {
-      // fallback local
+    } catch (error) {
+      if (error instanceof BackendResponseError) {
+        throw error;
+      }
+
+      // fallback local somente quando a API estiver indisponivel
     }
 
     const empresa = await empresaService.criarEmpresa({ nome: empresaNome, email: empresaEmail });
@@ -222,6 +242,7 @@ export const authService = {
   async login(payload: { email: string; senha: string }): Promise<SessionData> {
     const email = String(payload.email || '').trim().toLowerCase();
     const senha = String(payload.senha || '');
+    let apiUnavailable = false;
 
     if (!email || !senha) {
       throw new Error('Informe email e senha.');
@@ -234,7 +255,7 @@ export const authService = {
         body: JSON.stringify({ email, password: senha })
       });
 
-      const result = await response.json();
+      const result = await parseJsonSafe(response);
 
       if (response.ok) {
         const accessToken = String(result?.session?.access_token || '').trim();
@@ -268,14 +289,31 @@ export const authService = {
           accessToken
         };
       }
-    } catch (_error) {
-      // fallback local
+
+      const backendMessage = String(result?.message || '').trim();
+      throw new BackendResponseError(backendMessage || 'Credenciais invalidas.');
+    } catch (error) {
+      if (error instanceof BackendResponseError) {
+        throw error;
+      }
+
+      apiUnavailable = true;
+      // fallback local somente quando a API estiver indisponivel
     }
 
     const storage = getStorage();
+
+    if (apiUnavailable && storage.users.length === 0) {
+      throw new Error('Nao foi possivel conectar ao servidor. Verifique o backend ou configure VITE_API_URL para a API publicada.');
+    }
+
     const userRecord = storage.users.find((item) => item.email === email && item.senha === senha);
 
     if (!userRecord) {
+      if (apiUnavailable) {
+        throw new Error('Servidor indisponivel e nenhuma credencial local corresponde a este usuario.');
+      }
+
       throw new Error('Credenciais invalidas.');
     }
 

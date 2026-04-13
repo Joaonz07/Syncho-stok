@@ -35,7 +35,7 @@ export const sendSupportRequestNotification = async (payload: SupportEmailPayloa
     return;
   }
 
-  const notifyEmail = String(process.env.SUPPORT_NOTIFY_EMAIL || process.env.SMTP_USER || '').trim();
+  const notifyEmail = String(process.env.SUPPORT_NOTIFY_EMAIL || 'contato@syncho.cloud').trim();
   const fromEmail = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
 
   const html = `
