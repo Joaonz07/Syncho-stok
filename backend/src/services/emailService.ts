@@ -1,4 +1,8 @@
+import dns from 'node:dns';
 import nodemailer from 'nodemailer';
+import SMTPTransport from 'nodemailer/lib/smtp-transport';
+
+dns.setDefaultResultOrder('ipv4first');
 
 type SupportEmailPayload = {
   requestId: string;
@@ -19,15 +23,22 @@ const getTransporter = () => {
     return null;
   }
 
-  return nodemailer.createTransport({
+  const transportOptions: SMTPTransport.Options = {
     host,
     port,
     secure: port === 465,
+    requireTLS: port !== 465,
+    name: 'syncho.cloud',
     auth: { user, pass },
+    tls: {
+      servername: host
+    },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000
-  });
+  };
+
+  return nodemailer.createTransport(transportOptions);
 };
 
 export const sendSupportRequestNotification = async (payload: SupportEmailPayload) => {
