@@ -13,16 +13,34 @@ type SupportEmailPayload = {
   message: string;
 };
 
-const getTransporter = () => {
-  const host = String(process.env.SMTP_HOST || '').trim();
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = String(process.env.SMTP_USER || '').trim();
-  const pass = String(process.env.SMTP_PASS || '').trim();
+// Cache de resoluções DNS para evitar múltiplas buscas
+const dnsCache = new Map<string, { ip: string; timestamp: number }>();
+const DNS_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
-  if (!host || !port || !user || !pass) {
-    return null;
+const resolveHostToIPv4 = async (host: string): Promise<string> => {
+  const cached = dnsCache.get(host);
+  if (cached && Date.now() - cached.timestamp < DNS_CACHE_TTL) {
+    return cached.ip;
   }
 
+  try {
+    const addresses = await dns.promises.resolve4(host);
+    if (addresses.length === 0) {
+      console.warn(`[support-email] nenhum endereco IPv4 resolvido para ${host}`);
+      return host;
+    }
+    
+    const ip = addresses[0];
+    dnsCache.set(host, { ip, timestamp: Date.now() });
+    console.debug(`[support-email] resolvido ${host} -> ${ip}`);
+    return ip;
+  } catch (error) {
+    console.warn(`[support-email] erro ao resolver IPv4 de ${host}:`, error);
+    return host;
+  }
+};
+
+const getTransporter = (host: string, port: number, user: string, pass: string) => {
   const transportOptions: SMTPTransport.Options = {
     host,
     port,
@@ -31,7 +49,7 @@ const getTransporter = () => {
     name: 'syncho.cloud',
     auth: { user, pass },
     tls: {
-      servername: host
+      servername: process.env.SMTP_HOST || host
     },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
@@ -42,12 +60,19 @@ const getTransporter = () => {
 };
 
 export const sendSupportRequestNotification = async (payload: SupportEmailPayload) => {
-  const transporter = getTransporter();
+  const host = String(process.env.SMTP_HOST || '').trim();
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = String(process.env.SMTP_USER || '').trim();
+  const pass = String(process.env.SMTP_PASS || '').trim();
 
-  if (!transporter) {
+  if (!host || !port || !user || !pass) {
     console.warn('[support-email] SMTP nao configurado; notificacao por e-mail ignorada.');
     return;
   }
+
+  // Resolve host para IPv4 explicitamente
+  const ipv4Host = await resolveHostToIPv4(host);
+  const transporter = getTransporter(ipv4Host, port, user, pass);
 
   const notifyEmail = String(process.env.SUPPORT_NOTIFY_EMAIL || 'contato@syncho.cloud').trim();
   const fromEmail = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
