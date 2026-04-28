@@ -42,6 +42,7 @@ import {
   Download,
   ReceiptText
 } from 'lucide-react';
+import RootAdminWorkspace from '../components/admin/RootAdminWorkspace';
 import SettingsWorkspace from '../components/settings/SettingsWorkspace';
 
 const AnalyticsCharts = lazy(() => import('../components/charts/AnalyticsCharts'));
@@ -4932,378 +4933,38 @@ const Dashboard = () => {
           ) : null}
 
           {role === 'ADMIN' && activeView === 'admin' ? (
-            <div className="grid gap-6">
-              <div className={[
-                'rounded-2xl border p-5',
-                isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(34,211,238,0.12)]' : 'border-slate-200 bg-white'
-              ].join(' ')}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Admin Dashboard SaaS</h1>
-                    <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                      Painel central para gerenciar receita, empresas, usuarios, planos e suporte.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { key: 'overview' as const, label: 'Dashboard' },
-                      { key: 'companies' as const, label: 'Empresas' },
-                      { key: 'users' as const, label: 'Usuarios' },
-                      { key: 'plans' as const, label: 'Planos' },
-                      { key: 'support' as const, label: 'Suporte' }
-                    ].map((tab) => (
-                      <button
-                        key={tab.key}
-                        type="button"
-                        onClick={() => setAdminSection(tab.key)}
-                        className={[
-                          'rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all',
-                          adminSection === tab.key
-                            ? isDarkTheme ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-300' : 'border-blue-300 bg-blue-50 text-blue-700'
-                            : isDarkTheme ? 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        ].join(' ')}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {adminSection === 'overview' ? (
-                <div className="grid gap-5">
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    {[
-                      {
-                        label: 'MRR Total',
-                        value: formatCurrency(adminOverview.mrr),
-                        sub: 'Receita recorrente mensal',
-                        glow: 'shadow-[0_0_20px_rgba(59,130,246,0.22)]',
-                        border: 'border-blue-500/20',
-                        icon: DollarSign
-                      },
-                      {
-                        label: 'Empresas',
-                        value: String(adminOverview.totalCompanies),
-                        sub: `${adminOverview.activeCompanies} ativas`,
-                        glow: 'shadow-[0_0_20px_rgba(168,85,247,0.22)]',
-                        border: 'border-purple-500/20',
-                        icon: LayoutDashboard
-                      },
-                      {
-                        label: 'Crescimento',
-                        value: `${adminOverview.monthlyGrowth >= 0 ? '+' : ''}${adminOverview.monthlyGrowth.toFixed(1)}%`,
-                        sub: 'Comparado ao ultimo mes',
-                        glow: 'shadow-[0_0_20px_rgba(16,185,129,0.22)]',
-                        border: 'border-emerald-500/20',
-                        icon: TrendingUp
-                      },
-                      {
-                        label: 'Ativas vs Inativas',
-                        value: `${adminOverview.activeCompanies} / ${adminOverview.inactiveCompanies}`,
-                        sub: 'Saude da base de clientes',
-                        glow: 'shadow-[0_0_20px_rgba(244,63,94,0.2)]',
-                        border: 'border-rose-500/20',
-                        icon: Activity
-                      }
-                    ].map((card) => {
-                      const Icon = card.icon;
-                      return (
-                        <motion.div
-                          key={card.label}
-                          whileHover={{ y: -3, scale: 1.01 }}
-                          className={[
-                            'rounded-2xl border p-4 transition-all',
-                            isDarkTheme ? `bg-[#0d1117] ${card.border} ${card.glow}` : 'border-slate-200 bg-white'
-                          ].join(' ')}
-                        >
-                          <div className="flex items-center justify-between">
-                            <p className={['text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{card.label}</p>
-                            <span className="rounded-lg bg-white/10 p-1.5">
-                              <Icon className={['h-4 w-4', isDarkTheme ? 'text-cyan-300' : 'text-blue-600'].join(' ')} />
-                            </span>
-                          </div>
-                          <p className={['mt-3 text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{card.value}</p>
-                          <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>{card.sub}</p>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="grid gap-4 xl:grid-cols-3">
-                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-blue-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'].join(' ')}>
-                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Receita media mensal</h3>
-                      <p className={['mb-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Resumo sem grafico para melhor desempenho</p>
-                      <p className={['text-2xl font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-900'].join(' ')}>
-                        {formatCurrency(
-                          adminNewCompaniesSeries.length
-                            ? adminNewCompaniesSeries.reduce((acc, item) => acc + Number(item.revenue || 0), 0) / adminNewCompaniesSeries.length
-                            : 0
-                        )}
-                      </p>
-                    </div>
-                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-purple-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'].join(' ')}>
-                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Distribuicao de planos</h3>
-                      <div className="mt-3 space-y-2">
-                        {adminPlanDistributionData.map((plan) => (
-                          <div key={plan.name} className={['flex items-center justify-between rounded-lg px-3 py-2 text-xs', isDarkTheme ? 'bg-slate-900/70 text-slate-200' : 'bg-slate-100 text-slate-700'].join(' ')}>
-                            <span>{plan.name}</span>
-                            <strong>{plan.value}</strong>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className={['rounded-2xl border p-5', isDarkTheme ? 'border-cyan-500/20 bg-[#0d1117]' : 'border-slate-200 bg-white'].join(' ')}>
-                      <h3 className={['text-sm font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Novas empresas (6 meses)</h3>
-                      <div className="mt-3 space-y-2">
-                        {adminNewCompaniesSeries.slice(-6).map((entry) => (
-                          <div key={entry.month} className={['flex items-center justify-between rounded-lg px-3 py-2 text-xs', isDarkTheme ? 'bg-slate-900/70 text-slate-200' : 'bg-slate-100 text-slate-700'].join(' ')}>
-                            <span>{entry.month}</span>
-                            <strong>{entry.companies}</strong>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {adminSection === 'companies' ? (
-                <div className={themedPanelClass}>
-                  <div className="mb-4 flex items-center justify-between">
-                    <h2 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Gestao de empresas</h2>
-                    <button type="button" onClick={() => void fetchAdminData()} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'}>Atualizar</button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[860px] text-sm">
-                      <thead>
-                        <tr className={isDarkTheme ? 'border-b border-white/10 text-slate-400' : 'border-b border-slate-100 text-slate-500'}>
-                          <th className="px-2 py-2 text-left">Empresa</th>
-                          <th className="px-2 py-2 text-left">Plano</th>
-                          <th className="px-2 py-2 text-left">Status</th>
-                          <th className="px-2 py-2 text-left">Expiracao</th>
-                          <th className="px-2 py-2 text-right">Acoes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {companies.map((company) => {
-                          const status = (company.subscription_status || company.subscriptionStatus || 'ACTIVE') as CompanyStatus;
-                          const expiresAt = String(company.expires_at || company.expiresAt || '').slice(0, 10) || 'Sem limite';
-                          const companyPlan = (company.plan || 'BASIC') as CompanyPlan;
-                          return (
-                            <tr key={company.id} className={isDarkTheme ? 'border-b border-white/5' : 'border-b border-slate-100'}>
-                              <td className="px-2 py-3">
-                                <p className={['font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{company.name}</p>
-                                <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>{company.id}</p>
-                              </td>
-                              <td className="px-2 py-3">
-                                <select
-                                  value={companyPlan}
-                                  onChange={(event) => void setCompanyPlanQuick(company, event.target.value as CompanyPlan)}
-                                  className={isDarkTheme ? 'rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-100' : 'rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700'}
-                                >
-                                  <option value="BASIC">BASIC</option>
-                                  <option value="PRO">PRO</option>
-                                  <option value="PREMIUM">PREMIUM</option>
-                                </select>
-                              </td>
-                              <td className="px-2 py-3">
-                                <span className={[
-                                  'rounded-full px-2 py-1 text-xs font-semibold',
-                                  status === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'
-                                ].join(' ')}>
-                                  {status}
-                                </span>
-                              </td>
-                              <td className={['px-2 py-3 text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{expiresAt}</td>
-                              <td className="px-2 py-3 text-right">
-                                <div className="inline-flex items-center gap-2">
-                                  <button type="button" onClick={() => void toggleCompanyBlocked(company)} className={status === 'BLOCKED' ? 'rounded-lg border border-emerald-400/40 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10' : 'rounded-lg border border-rose-400/40 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/10'}>
-                                    {status === 'BLOCKED' ? 'Desbloquear' : 'Bloquear'}
-                                  </button>
-                                  <button type="button" onClick={() => accessCompanyContext(company.id)} className={isDarkTheme ? 'rounded-lg border border-cyan-400/40 px-2.5 py-1 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10' : 'rounded-lg border border-blue-200 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50'}>
-                                    Acessar empresa
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : null}
-
-              {adminSection === 'users' ? (
-                <div className={themedPanelClass}>
-                  <h2 className={['mb-4 text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Gestao de usuarios por empresa</h2>
-                  <div className="grid gap-4">
-                    {Object.entries(
-                        managedUsers
-                          .filter((user) => String(user.role || '').toUpperCase() === 'CLIENT')
-                          .reduce<Record<string, ManagedUser[]>>((acc, user) => {
-                        const key = String(user.company_id || user.companyId || 'Sem empresa');
-                        if (!acc[key]) {
-                          acc[key] = [];
-                        }
-                        acc[key].push(user);
-                        return acc;
-                          }, {})
-                    ).map(([companyRef, users]) => (
-                      <div key={companyRef} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
-                        <p className={['mb-3 text-sm font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>
-                          {companyOptions.find((opt) => opt.id === companyRef)?.name || companyRef}
-                        </p>
-                        <div className="grid gap-2">
-                          {users.map((user) => {
-                            const accessUntil = String(user.access_until || user.accessUntil || '').trim();
-                            const disabled = Boolean(accessUntil && new Date(accessUntil).getTime() < Date.now());
-                            return (
-                              <div key={user.id} className={['flex items-center justify-between rounded-lg px-3 py-2', isDarkTheme ? 'bg-black/20' : 'bg-slate-50'].join(' ')}>
-                                <div>
-                                  <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{user.name}</p>
-                                  <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{user.email} · {user.role}</p>
-                                </div>
-                                {user.role === 'CLIENT' ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => void toggleUserEnabled(user)}
-                                    className={disabled ? 'rounded-lg border border-emerald-400/40 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10' : 'rounded-lg border border-rose-400/40 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/10'}
-                                  >
-                                    {disabled ? 'Habilitar' : 'Desabilitar'}
-                                  </button>
-                                ) : (
-                                  <span className={['text-xs font-semibold', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Administrador</span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-
-                  <div className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
-                    <p className={['mb-3 text-sm font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>
-                      Administradores da plataforma
-                    </p>
-                    <div className="grid gap-2">
-                      {managedUsers
-                        .filter((user) => String(user.role || '').toUpperCase() !== 'CLIENT')
-                        .map((user) => (
-                          <div key={user.id} className={['flex items-center justify-between rounded-lg px-3 py-2', isDarkTheme ? 'bg-black/20' : 'bg-slate-50'].join(' ')}>
-                            <div>
-                              <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{user.name}</p>
-                              <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{user.email} · {user.role}</p>
-                            </div>
-                            <span className={['text-xs font-semibold', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>Sem empresa vinculada</span>
-                          </div>
-                        ))}
-                      {!managedUsers.some((user) => String(user.role || '').toUpperCase() !== 'CLIENT') ? (
-                        <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                          Nenhum administrador cadastrado.
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {adminSection === 'plans' ? (
-                <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-                  <div className={themedPanelClass}>
-                    <h2 className={['mb-4 text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Catalogo de planos</h2>
-                    <div className="grid gap-3">
-                      {planCatalog.map((plan) => (
-                        <div key={plan.id} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className={['text-sm font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{plan.name}</p>
-                              <p className={['text-xs', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>{formatCurrency(plan.price)}/mes</p>
-                              <p className={['mt-2 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{plan.features.join(' • ') || 'Sem features cadastradas'}</p>
-                            </div>
-                            <div className="flex gap-2">
-                              <button type="button" onClick={() => openPlanEditor(plan)} className={isDarkTheme ? 'rounded-lg border border-white/10 px-2.5 py-1 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50'}>Editar</button>
-                              <button type="button" onClick={() => deletePlanItem(plan.id)} className="rounded-lg border border-rose-400/40 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/10">Excluir</button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className={themedPanelClass}>
-                    <h3 className={['text-base font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{planEditorId ? 'Editar plano' : 'Criar plano'}</h3>
-                    <div className="mt-3 grid gap-3">
-                      <input className={themedInputClass} placeholder="Nome (ex: ENTERPRISE)" value={planEditorName} onChange={(event) => setPlanEditorName(event.target.value)} />
-                      <input className={themedInputClass} type="number" min="0" step="1" placeholder="Preco mensal" value={planEditorPrice} onChange={(event) => setPlanEditorPrice(event.target.value)} />
-                      <textarea className={themedInputClass} rows={5} placeholder="Features (uma por linha)" value={planEditorFeatures} onChange={(event) => setPlanEditorFeatures(event.target.value)} />
-                    </div>
-                    <div className="mt-4 flex gap-2">
-                      <button type="button" onClick={savePlanEditor} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500">Salvar plano</button>
-                      <button type="button" onClick={() => openPlanEditor()} className={isDarkTheme ? 'rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'}>Limpar</button>
-                    </div>
-                    <p className={['mt-3 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                      Valores e recursos ficam salvos no navegador para simulacao administrativa.
-                    </p>
-                  </div>
-                </div>
-              ) : null}
-
-              {adminSection === 'support' ? (
-                <div className={themedPanelClass}>
-                  <div className="mb-4 flex items-center justify-between">
-                    <h2 className={['text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Central de suporte</h2>
-                    <button type="button" onClick={() => void fetchSupportRequests()} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10' : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'}>Atualizar</button>
-                  </div>
-                  <div className="grid gap-3">
-                    {supportRequests.map((request) => (
-                      <div key={request.id} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{request.subject || 'Chamado sem assunto'}</p>
-                            <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{request.requesterName || request.requesterEmail || 'Cliente'} · {String(request.createdAt || '').slice(0, 10)}</p>
-                            <p className={['mt-2 text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>{request.message}</p>
-                          </div>
-                          <div className="grid gap-2">
-                            <select
-                              value={supportDrafts[request.id]?.status || request.status}
-                              onChange={(event) =>
-                                setSupportDrafts((current) => ({
-                                  ...current,
-                                  [request.id]: {
-                                    status: event.target.value as SupportRequestStatus,
-                                    adminResponse: current[request.id]?.adminResponse || request.adminResponse || ''
-                                  }
-                                }))
-                              }
-                              className={isDarkTheme ? 'rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-100' : 'rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700'}
-                            >
-                              <option value="PENDING">Pendente</option>
-                              <option value="IN_REVIEW">Em analise</option>
-                              <option value="DONE">Resolvido</option>
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => void saveSupportRequestByAdmin(request.id, request.companyId)}
-                              className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500"
-                            >
-                              Salvar
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {!supportRequests.length ? (
-                      <p className={['text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                        Nenhuma solicitacao de suporte encontrada.
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-            </div>
+            <RootAdminWorkspace
+              adminSection={adminSection}
+              setAdminSection={setAdminSection}
+              displayUserName={displayUserName || 'Root Admin'}
+              displayUserEmail={displayUserEmail || 'root@syncho.cloud'}
+              uiTheme={uiTheme}
+              setUiTheme={setUiTheme}
+              isDarkTheme={isDarkTheme}
+              companies={companies}
+              managedUsers={managedUsers}
+              companyOptions={companyOptions}
+              adminOverview={adminOverview}
+              adminPlanDistributionData={adminPlanDistributionData}
+              adminNewCompaniesSeries={adminNewCompaniesSeries}
+              planCatalog={planCatalog}
+              planEditorId={planEditorId}
+              planEditorName={planEditorName}
+              setPlanEditorName={setPlanEditorName}
+              planEditorPrice={planEditorPrice}
+              setPlanEditorPrice={setPlanEditorPrice}
+              planEditorFeatures={planEditorFeatures}
+              setPlanEditorFeatures={setPlanEditorFeatures}
+              fetchAdminData={fetchAdminData}
+              setCompanyPlanQuick={setCompanyPlanQuick}
+              toggleCompanyBlocked={toggleCompanyBlocked}
+              accessCompanyContext={accessCompanyContext}
+              toggleUserEnabled={toggleUserEnabled}
+              openPlanEditor={openPlanEditor}
+              savePlanEditor={savePlanEditor}
+              deletePlanItem={deletePlanItem}
+              showToast={showToast}
+            />
           ) : null}
 
           {role === 'ADMIN' && activeView === 'companies' ? (
