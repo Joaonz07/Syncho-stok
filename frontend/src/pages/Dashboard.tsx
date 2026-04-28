@@ -45,6 +45,7 @@ import {
 import AgendaCalendarWorkspace from '../components/modules/AgendaCalendarWorkspace';
 import BudgetsWorkspace from '../components/modules/BudgetsWorkspace';
 import CmsPagesWorkspace from '../components/modules/CmsPagesWorkspace';
+import InventoryERPWorkspace from '../components/modules/InventoryERPWorkspace';
 import TasksKanbanWorkspace from '../components/modules/TasksKanbanWorkspace';
 import RootAdminWorkspace from '../components/admin/RootAdminWorkspace';
 import SettingsWorkspace from '../components/settings/SettingsWorkspace';
@@ -806,7 +807,6 @@ const Dashboard = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
-  const [inventoryLoading, setInventoryLoading] = useState(false);
   const [showProductCreateModal, setShowProductCreateModal] = useState(false);
   const [productName, setProductName] = useState('');
   const [productPrice, setProductPrice] = useState('');
@@ -2252,8 +2252,6 @@ const Dashboard = () => {
       return;
     }
 
-    setInventoryLoading(true);
-
     try {
       const response = await fetch(
         `/api/dashboard/inventory?companyId=${encodeURIComponent(targetCompanyId)}`,
@@ -2272,47 +2270,6 @@ const Dashboard = () => {
       setStatus('Estoque carregado com sucesso.');
     } catch (_error) {
       setStatus('Erro de rede ao carregar estoque.');
-    } finally {
-      setInventoryLoading(false);
-    }
-  };
-
-  const adjustInventory = async (productId: string, action: 'add' | 'remove', amount = 1) => {
-    if (!token) {
-      return;
-    }
-
-    const targetCompanyId = getTargetCompanyId(productCompanyId);
-
-    if (!targetCompanyId) {
-      setStatus('Selecione uma empresa para ajustar estoque.');
-      return;
-    }
-
-    setInventoryLoading(true);
-
-    try {
-      const response = await fetch(`/api/dashboard/inventory/${encodeURIComponent(productId)}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ companyId: targetCompanyId, action, amount })
-      });
-      const result = await response.json();
-
-      if (!response.ok) {
-        setStatus(result.message || 'Falha ao ajustar estoque.');
-        return;
-      }
-
-      setStatus('Estoque atualizado com sucesso.');
-      await Promise.all([fetchInventory(), fetchProducts(), fetchSalesAnalysis({ silent: true })]);
-    } catch (_error) {
-      setStatus('Erro de rede ao ajustar estoque.');
-    } finally {
-      setInventoryLoading(false);
     }
   };
 
@@ -5236,62 +5193,7 @@ const Dashboard = () => {
           ) : null}
 
           {activeView === 'inventory' ? (
-            <div className="grid gap-6">
-              <div className={themedPanelClass}>
-                <h1 className={themedTitleClass}>Estoque</h1>
-                <p className={['mt-1', themedSubtextClass].join(' ')}>Controle de quantidade separado do cadastro de produtos.</p>
-
-                <div className="mt-4 flex gap-2">
-                  <button type="button" onClick={fetchInventory} disabled={inventoryLoading} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-300 hover:bg-slate-100 disabled:opacity-70">Atualizar estoque</button>
-                </div>
-              </div>
-
-              <div className={themedPanelClass}>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[620px] text-sm">
-                    <thead>
-                      <tr className={isDarkTheme ? 'text-slate-300' : 'text-slate-600'}>
-                        <th className="px-3 py-2 text-left">Produto</th>
-                        <th className="px-3 py-2 text-left">Quantidade</th>
-                        <th className="px-3 py-2 text-left">Status</th>
-                        <th className="px-3 py-2 text-right">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {inventoryItems.map((item) => {
-                        const quantity = Number(item.quantity || 0);
-                        const lowStock = quantity <= 5;
-
-                        return (
-                          <tr key={item.id} className={isDarkTheme ? 'border-t border-white/10' : 'border-t border-slate-200'}>
-                            <td className="px-3 py-3 font-semibold">{item.name}</td>
-                            <td className="px-3 py-3">{quantity}</td>
-                            <td className="px-3 py-3">
-                              <span className={[
-                                'rounded-full px-2 py-1 text-xs font-semibold',
-                                lowStock ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
-                              ].join(' ')}>
-                                {lowStock ? 'Estoque baixo' : 'Normal'}
-                              </span>
-                            </td>
-                            <td className="px-3 py-3 text-right">
-                              <div className="inline-flex items-center gap-2">
-                                <button type="button" onClick={() => void adjustInventory(String(item.product_id || item.productId || item.id), 'remove', 1)} disabled={inventoryLoading} className="rounded-lg border border-rose-400/40 px-3 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/10 disabled:opacity-60">- Remover</button>
-                                <button type="button" onClick={() => void adjustInventory(String(item.product_id || item.productId || item.id), 'add', 1)} disabled={inventoryLoading} className="rounded-lg border border-emerald-400/40 px-3 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-60">+ Adicionar</button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-
-                  {!inventoryItems.length ? (
-                    <p className={['mt-4 text-sm', themedSubtextClass].join(' ')}>Nenhum item de estoque encontrado.</p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <InventoryERPWorkspace showToast={showToast} />
           ) : null}
 
           {activeView === 'integrations' && (role === 'DEV' || role === 'ADMIN') ? (
