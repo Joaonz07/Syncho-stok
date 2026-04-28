@@ -21,6 +21,7 @@ import externalIntegrationRoutes from './routes/externalIntegrationRoutes';
 const app = express();
 const publicPath = path.resolve(__dirname, '..', 'public');
 const allowedOrigins = getAllowedOrigins();
+const isDesktopOrigin = (origin?: string) => origin === 'null' || String(origin || '').startsWith('file://');
 const canServeFrontend = shouldServeFrontend() && existsSync(path.join(publicPath, 'index.html'));
 const globalRateLimit = createRateLimit({
 	keyPrefix: 'global',
@@ -64,7 +65,7 @@ app.use(
 app.use(
 	cors({
 		origin: (origin, callback) => {
-			if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+			if (!origin || isDesktopOrigin(origin) || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
 				callback(null, true);
 				return;
 			}

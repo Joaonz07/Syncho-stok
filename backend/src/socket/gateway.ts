@@ -211,9 +211,17 @@ const asConnectedUser = async (token: string): Promise<ConnectedUser | null> => 
 
 export const initSocketGateway = (httpServer: HttpServer) => {
   const allowedOrigins = getAllowedOrigins();
+  const isDesktopOrigin = (origin?: string) => origin === 'null' || String(origin || '').startsWith('file://');
   const io = new SocketServer(httpServer, {
     cors: {
-      origin: allowedOrigins.length > 0 ? allowedOrigins : true
+      origin: (origin, callback) => {
+        if (!origin || isDesktopOrigin(origin) || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+
+        callback(new Error('Origin nao permitida pelo CORS do socket.'));
+      }
     }
   });
 
