@@ -364,13 +364,25 @@ const PDVPage = () => {
                 className={[
                   'w-full rounded-xl border px-3 py-2 text-sm outline-none',
                   isDarkTheme
-                    ? 'border-white/10 bg-white/5 text-slate-100'
+                    ? 'border-white/10 bg-slate-900 text-slate-100'
                     : 'border-slate-200 bg-slate-50 text-slate-800'
                 ].join(' ')}
+                style={isDarkTheme ? { colorScheme: 'dark' } : undefined}
               >
-                <option value="">Selecione a empresa</option>
+                <option
+                  value=""
+                  style={isDarkTheme ? { backgroundColor: '#0f172a', color: '#f8fafc' } : undefined}
+                >
+                  Selecione a empresa
+                </option>
                 {empresas.map((empresa) => (
-                  <option key={empresa.id} value={empresa.id}>{empresa.name}</option>
+                  <option
+                    key={empresa.id}
+                    value={empresa.id}
+                    style={isDarkTheme ? { backgroundColor: '#0f172a', color: '#f8fafc' } : undefined}
+                  >
+                    {empresa.name}
+                  </option>
                 ))}
               </select>
             </div>
