@@ -42,6 +42,7 @@ import {
   Download,
   ReceiptText
 } from 'lucide-react';
+import SettingsWorkspace from '../components/settings/SettingsWorkspace';
 
 const AnalyticsCharts = lazy(() => import('../components/charts/AnalyticsCharts'));
 
@@ -5893,235 +5894,35 @@ const Dashboard = () => {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
-              className="mx-auto w-full max-w-4xl space-y-6"
             >
-              {/* Header */}
-              <div>
-                <h1 className={['text-2xl font-bold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Configuracoes</h1>
-                <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Gerencie seu perfil, empresa e seguranca</p>
-              </div>
-
-              {/* CARD: Perfil */}
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.05 }}
-                className={['rounded-2xl border p-6 shadow-sm', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}
-              >
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/20 text-blue-400">
-                    <Users className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h2 className={['text-base font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Perfil do usuario</h2>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Informacoes da sua conta</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-5">
-                  <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-xl font-bold text-white shadow-lg">
-                    {(displayUserName || 'U').slice(0, 1).toUpperCase()}
-                  </div>
-                  <div className="grid gap-1 flex-1">
-                    <p className={['text-lg font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{displayUserName || 'Usuario'}</p>
-                    <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{displayUserEmail || 'email@empresa.com'}</p>
-                    <span className={['inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-semibold', role === 'ADMIN' ? 'bg-purple-500/15 text-purple-300' : 'bg-blue-500/15 text-blue-300'].join(' ')}>
-                      {role === 'ADMIN' ? 'Administrador' : 'Cliente'}
-                    </span>
-                  </div>
-                </div>
-              </motion.div>
-
-              {/* CARD: Empresa */}
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.1 }}
-                className={['rounded-2xl border p-6 shadow-sm', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}
-              >
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
-                    <BarChart3 className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h2 className={['text-base font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Empresa</h2>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Dados da sua empresa e plano</p>
-                  </div>
-                </div>
-
-                {role === 'ADMIN' ? (
-                  <div className="mb-4 grid gap-3 sm:grid-cols-2">
-                    <select
-                      className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
-                      value={settingsCompanyId}
-                      onChange={(event) => setSettingsCompanyId(event.target.value)}
-                      style={themedSelectNativeStyle}
-                    >
-                      <option value="" style={themedOptionNativeStyle}>Selecione a empresa</option>
-                      {companyOptions.map((option) => (
-                        <option key={option.id} value={option.id} style={themedOptionNativeStyle}>{option.name}</option>
-                      ))}
-                    </select>
-                    <div className="flex gap-2">
-                      <select
-                        className={['flex-1 rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
-                        value={settingsPlan}
-                        onChange={(event) => setSettingsPlan(event.target.value as CompanyPlan)}
-                        style={themedSelectNativeStyle}
-                      >
-                        <option value="BASIC" style={themedOptionNativeStyle}>BASIC</option>
-                        <option value="PRO" style={themedOptionNativeStyle}>PRO</option>
-                        <option value="PREMIUM" style={themedOptionNativeStyle}>PREMIUM</option>
-                      </select>
-                      <input
-                        type="date"
-                        className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
-                        value={settingsExpiresAt}
-                        onChange={(event) => setSettingsExpiresAt(event.target.value)}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-
-                {settingsCompanyInfo ? (
-                  <div className={['rounded-xl border p-4 text-sm', isDarkTheme ? 'border-white/8 bg-black/20' : 'border-slate-100 bg-slate-50'].join(' ')}>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <div>
-                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Nome da empresa</p>
-                        <p className={['mt-1 font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{settingsCompanyInfo.name || '-'}</p>
-                      </div>
-                      <div>
-                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Localizacao</p>
-                        <p className={['mt-1 font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{settingsCompanyInfo.location || 'Nao informada'}</p>
-                      </div>
-                      <div>
-                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Plano</p>
-                        <span className="mt-1 inline-flex rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-semibold text-blue-300">{settingsSubscription?.plan || '-'}</span>
-                      </div>
-                      <div>
-                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Status</p>
-                        <span className={['mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold', settingsSubscription?.status === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'].join(' ')}>
-                          {settingsSubscription?.status || '-'}
-                        </span>
-                      </div>
-                      <div>
-                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Expira em</p>
-                        <p className={['mt-1 font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{settingsSubscription?.expiresAt ? String(settingsSubscription.expiresAt).slice(0, 10) : 'Sem limite'}</p>
-                      </div>
-                      <div>
-                        <p className={['text-xs font-medium uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Acesso ate</p>
-                        <p className={['mt-1 font-semibold', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{settingsAccessUntil ? String(settingsAccessUntil).slice(0, 10) : 'Sem limite'}</p>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                    {settingsLoading ? 'Carregando...' : 'Clique em "Carregar dados" para ver as informacoes da empresa.'}
-                  </p>
-                )}
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={fetchSettings}
-                    disabled={settingsLoading}
-                    className={['rounded-xl px-4 py-2 text-sm font-semibold transition-all disabled:opacity-70', isDarkTheme ? 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10' : 'border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'].join(' ')}
-                  >
-                    {settingsLoading ? 'Carregando...' : 'Carregar dados'}
-                  </button>
-                  {role === 'ADMIN' ? (
-                    <button
-                      type="button"
-                      onClick={saveSettings}
-                      disabled={settingsLoading}
-                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-blue-700 disabled:opacity-70"
-                    >
-                      Salvar configuracoes
-                    </button>
-                  ) : null}
-                </div>
-              </motion.div>
-
-              {/* CARD: Seguranca */}
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.15 }}
-                className={['rounded-2xl border p-6 shadow-sm', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}
-              >
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/20 text-rose-400">
-                    <Settings className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h2 className={['text-base font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Seguranca</h2>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Altere sua senha de acesso</p>
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <input
-                    type="password"
-                    placeholder="Nova senha"
-                    className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
-                    value={settingsNewPassword}
-                    onChange={(event) => setSettingsNewPassword(event.target.value)}
-                  />
-                  <input
-                    type="password"
-                    placeholder="Confirmar nova senha"
-                    className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
-                    value={settingsConfirmPassword}
-                    onChange={(event) => setSettingsConfirmPassword(event.target.value)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={changePassword}
-                  disabled={settingsPasswordLoading || !settingsNewPassword || !settingsConfirmPassword}
-                  className="mt-4 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-rose-700 disabled:opacity-60"
-                >
-                  {settingsPasswordLoading ? 'Alterando...' : 'Alterar senha'}
-                </button>
-              </motion.div>
-
-              {/* CARD: Preferencias */}
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.2 }}
-                className={['rounded-2xl border p-6 shadow-sm', isDarkTheme ? 'border-white/10 bg-white/5 backdrop-blur-md' : 'border-slate-200 bg-white'].join(' ')}
-              >
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-yellow-500/20 text-yellow-400">
-                    <TrendingUp className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h2 className={['text-base font-semibold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Preferencias</h2>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Aparencia e configuracoes visuais</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className={['text-sm font-medium', isDarkTheme ? 'text-slate-200' : 'text-slate-700'].join(' ')}>Tema da interface</p>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Escolha entre modo claro e escuro</p>
-                  </div>
-                  <div className={['flex items-center gap-1 rounded-xl border px-1 py-1 text-xs', isDarkTheme ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-100'].join(' ')}>
-                    <button
-                      type="button"
-                      onClick={() => setUiTheme('light')}
-                      className={['rounded-lg px-3 py-1.5 text-xs font-semibold transition-all', uiTheme === 'light' ? 'bg-blue-600 text-white shadow' : isDarkTheme ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'].join(' ')}
-                    >
-                      Claro
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setUiTheme('dark')}
-                      className={['rounded-lg px-3 py-1.5 text-xs font-semibold transition-all', uiTheme === 'dark' ? 'bg-cyan-500 text-slate-900 shadow' : isDarkTheme ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'].join(' ')}
-                    >
-                      Escuro
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
+              <SettingsWorkspace
+                role={role ?? 'CLIENT'}
+                displayUserName={displayUserName || 'Usuario'}
+                displayUserEmail={displayUserEmail || 'email@syncho.cloud'}
+                uiTheme={uiTheme}
+                setUiTheme={setUiTheme}
+                isDarkTheme={isDarkTheme}
+                settingsLoading={settingsLoading}
+                settingsPasswordLoading={settingsPasswordLoading}
+                settingsCompanyId={settingsCompanyId}
+                setSettingsCompanyId={setSettingsCompanyId}
+                companyOptions={companyOptions}
+                settingsCompanyInfo={settingsCompanyInfo}
+                settingsSubscription={settingsSubscription}
+                settingsAccessUntil={settingsAccessUntil}
+                settingsPlan={settingsPlan}
+                setSettingsPlan={setSettingsPlan}
+                settingsExpiresAt={settingsExpiresAt}
+                setSettingsExpiresAt={setSettingsExpiresAt}
+                settingsNewPassword={settingsNewPassword}
+                setSettingsNewPassword={setSettingsNewPassword}
+                settingsConfirmPassword={settingsConfirmPassword}
+                setSettingsConfirmPassword={setSettingsConfirmPassword}
+                fetchSettings={fetchSettings}
+                saveSettings={saveSettings}
+                changePassword={changePassword}
+                showToast={showToast}
+              />
             </motion.div>
           ) : null}
 
