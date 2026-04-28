@@ -85,6 +85,7 @@ type Lead = {
 
 type CompanyPlan = 'BASIC' | 'PRO' | 'PREMIUM';
 type CompanyStatus = 'ACTIVE' | 'PAST_DUE' | 'CANCELED' | 'BLOCKED';
+type CompanyUserRole = 'COMPANY_ADMIN' | 'OPERATOR' | 'CASHIER';
 
 type Company = {
   id: string;
@@ -95,6 +96,8 @@ type Company = {
   subscriptionStatus?: CompanyStatus;
   expires_at?: string | null;
   expiresAt?: string | null;
+  created_at?: string | null;
+  createdAt?: string | null;
 };
 
 type ManagedUser = {
@@ -106,6 +109,27 @@ type ManagedUser = {
   companyId?: string | null;
   access_until?: string | null;
   accessUntil?: string | null;
+  company_user_role?: CompanyUserRole | null;
+  companyUserRole?: CompanyUserRole | null;
+};
+
+type AdminCompanyMutationPayload = {
+  name: string;
+  location?: string | null;
+  plan: CompanyPlan;
+  status?: CompanyStatus;
+  expiresAt?: string | null;
+};
+
+type AdminUserMutationPayload = {
+  name: string;
+  email: string;
+  password?: string;
+  role: 'ADMIN' | 'DEV' | 'CLIENT';
+  companyId?: string | null;
+  companyName?: string | null;
+  accessUntil?: string | null;
+  companyUserRole?: CompanyUserRole | null;
 };
 
 type Product = {
@@ -3341,9 +3365,9 @@ const Dashboard = () => {
     }
   };
 
-  const deleteCompany = async (targetCompanyId: string) => {
-    if (!token || !window.confirm('Excluir esta empresa e os dados vinculados?')) {
-      return;
+  const deleteCompany = async (targetCompanyId: string, skipConfirm = false) => {
+    if (!token || (!skipConfirm && !window.confirm('Excluir esta empresa e os dados vinculados?'))) {
+      return false;
     }
 
     setAdminLoading(true);
@@ -3357,7 +3381,7 @@ const Dashboard = () => {
 
       if (!response.ok) {
         setStatus(result.message || 'Falha ao excluir empresa.');
-        return;
+        return false;
       }
 
       if (editingCompanyId === targetCompanyId) {
@@ -3367,8 +3391,10 @@ const Dashboard = () => {
       setStatus('Empresa excluida com sucesso.');
       showToast('Empresa excluida');
       await fetchAdminData();
+      return true;
     } catch (_error) {
       setStatus('Erro de rede ao excluir empresa.');
+      return false;
     } finally {
       setAdminLoading(false);
     }
@@ -3506,9 +3532,9 @@ const Dashboard = () => {
     }
   };
 
-  const deleteUser = async (userId: string) => {
-    if (!token || !window.confirm('Excluir este usuario?')) {
-      return;
+  const deleteUser = async (userId: string, skipConfirm = false) => {
+    if (!token || (!skipConfirm && !window.confirm('Excluir este usuario?'))) {
+      return false;
     }
 
     setAdminLoading(true);
@@ -3522,7 +3548,7 @@ const Dashboard = () => {
 
       if (!response.ok) {
         setStatus(result.message || 'Falha ao excluir cliente.');
-        return;
+        return false;
       }
 
       if (editingUserId === userId) {
@@ -3532,8 +3558,205 @@ const Dashboard = () => {
       setStatus('Usuario excluido com sucesso.');
       showToast('Usuario excluido');
       await fetchAdminData();
+      return true;
     } catch (_error) {
       setStatus('Erro de rede ao excluir usuario.');
+      return false;
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const createAdminCompany = async (payload: AdminCompanyMutationPayload): Promise<Company | null> => {
+    if (!token) {
+      return null;
+    }
+
+    if (!payload.name.trim()) {
+      setStatus('Informe o nome da empresa.');
+      return null;
+    }
+
+    setAdminLoading(true);
+
+    try {
+      const response = await fetch('/api/admin/companies', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: payload.name.trim(),
+          location: payload.location?.trim() || null,
+          plan: payload.plan,
+          status: payload.status,
+          expiresAt: payload.expiresAt || null
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao criar empresa.');
+        return null;
+      }
+
+      await fetchAdminData();
+      setStatus('Empresa criada com sucesso.');
+      showToast('Empresa criada');
+      return (result.company || null) as Company | null;
+    } catch (_error) {
+      setStatus('Erro de rede ao criar empresa.');
+      return null;
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const updateAdminCompany = async (companyId: string, payload: AdminCompanyMutationPayload) => {
+    if (!token || !companyId.trim() || !payload.name.trim()) {
+      return false;
+    }
+
+    setAdminLoading(true);
+
+    try {
+      const response = await fetch(`/api/admin/companies/${companyId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: payload.name.trim(),
+          location: payload.location?.trim() || null,
+          plan: payload.plan,
+          status: payload.status,
+          expiresAt: payload.expiresAt || null
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao atualizar empresa.');
+        return false;
+      }
+
+      await fetchAdminData();
+      setStatus('Empresa atualizada com sucesso.');
+      showToast('Empresa atualizada');
+      return true;
+    } catch (_error) {
+      setStatus('Erro de rede ao atualizar empresa.');
+      return false;
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const createAdminUser = async (payload: AdminUserMutationPayload) => {
+    if (!token) {
+      return false;
+    }
+
+    if (!payload.name.trim() || !payload.email.trim() || !payload.password?.trim()) {
+      setStatus('Preencha nome, email e senha do usuario.');
+      return false;
+    }
+
+    if (payload.role === 'CLIENT' && !payload.companyId?.trim() && !payload.companyName?.trim()) {
+      setStatus('Usuario da empresa precisa de uma empresa vinculada.');
+      return false;
+    }
+
+    setAdminLoading(true);
+
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: payload.name.trim(),
+          email: payload.email.trim(),
+          password: payload.password,
+          role: payload.role,
+          companyId: payload.role === 'CLIENT' ? payload.companyId?.trim() || null : null,
+          companyName: payload.role === 'CLIENT' ? payload.companyName?.trim() || null : null,
+          accessUntil: payload.role === 'CLIENT' && payload.accessUntil ? new Date(payload.accessUntil).toISOString() : null,
+          companyUserRole: payload.role === 'CLIENT' ? payload.companyUserRole || 'COMPANY_ADMIN' : null
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao criar usuario.');
+        return false;
+      }
+
+      await fetchAdminData();
+      setStatus('Usuario criado com sucesso.');
+      showToast('Usuario criado');
+      return true;
+    } catch (_error) {
+      setStatus('Erro de rede ao criar usuario.');
+      return false;
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const updateAdminUser = async (userId: string, payload: AdminUserMutationPayload) => {
+    if (!token || !userId.trim() || !payload.name.trim() || !payload.email.trim()) {
+      return false;
+    }
+
+    if (payload.role === 'CLIENT' && !payload.companyId?.trim() && !payload.companyName?.trim()) {
+      setStatus('Usuario da empresa precisa de uma empresa vinculada.');
+      return false;
+    }
+
+    setAdminLoading(true);
+
+    try {
+      const response = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: payload.name.trim(),
+          email: payload.email.trim(),
+          role: payload.role,
+          companyId: payload.role === 'CLIENT' ? payload.companyId?.trim() || null : null,
+          companyName: payload.role === 'CLIENT' ? payload.companyName?.trim() || null : null,
+          accessUntil:
+            payload.role === 'CLIENT'
+              ? payload.accessUntil
+                ? new Date(payload.accessUntil).toISOString()
+                : null
+              : null,
+          password: payload.password?.trim() || undefined,
+          companyUserRole: payload.role === 'CLIENT' ? payload.companyUserRole || 'COMPANY_ADMIN' : null
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao atualizar usuario.');
+        return false;
+      }
+
+      await fetchAdminData();
+      setStatus('Usuario atualizado com sucesso.');
+      showToast('Usuario atualizado');
+      return true;
+    } catch (_error) {
+      setStatus('Erro de rede ao atualizar usuario.');
+      return false;
     } finally {
       setAdminLoading(false);
     }
@@ -5181,6 +5404,12 @@ const Dashboard = () => {
               toggleCompanyBlocked={toggleCompanyBlocked}
               accessCompanyContext={accessCompanyContext}
               toggleUserEnabled={toggleUserEnabled}
+              createCompany={createAdminCompany}
+              updateCompany={updateAdminCompany}
+              deleteCompany={(companyId) => deleteCompany(companyId, true)}
+              createManagedUser={createAdminUser}
+              updateManagedUser={updateAdminUser}
+              deleteManagedUser={(userId) => deleteUser(userId, true)}
               openPlanEditor={openPlanEditor}
               savePlanEditor={savePlanEditor}
               deletePlanItem={deletePlanItem}

@@ -17,6 +17,8 @@ import {
 
 const router = Router();
 
+type CompanyUserRole = 'COMPANY_ADMIN' | 'OPERATOR' | 'CASHIER';
+
 const tableAliases = {
   companies: ['companies', 'Company'],
   users: ['users', 'User'],
@@ -41,6 +43,48 @@ const normalizeStatus = (value: unknown): SubscriptionStatus => {
   }
 
   return 'ACTIVE';
+};
+
+const normalizeCompanyUserRole = (value: unknown): CompanyUserRole => {
+  const normalized = String(value || 'COMPANY_ADMIN').trim().toUpperCase();
+
+  if (normalized === 'OPERATOR') {
+    return 'OPERATOR';
+  }
+
+  if (normalized === 'CASHIER') {
+    return 'CASHIER';
+  }
+
+  return 'COMPANY_ADMIN';
+};
+
+const getAllAuthUsers = async () => {
+  const users = [] as Array<{
+    id: string;
+    user_metadata?: Record<string, unknown>;
+  }>;
+  let page = 1;
+  const perPage = 200;
+
+  while (true) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+
+    if (error) {
+      throw error;
+    }
+
+    const pageUsers = data.users || [];
+    users.push(...pageUsers);
+
+    if (pageUsers.length < perPage) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return users;
 };
 
 const insertWithAliases = async (
@@ -268,6 +312,34 @@ router.use(requireAuth, isAdmin);
 router.get('/dashboard', async (req, res) => {
   const companyId = String(req.query.companyId || '').trim() || undefined;
   const data = await getGlobalData(companyId);
+  let authUsersById = new Map<string, CompanyUserRole>();
+
+  try {
+    const authUsers = await getAllAuthUsers();
+    authUsersById = new Map(
+      authUsers.map((user) => {
+        const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+        return [user.id, normalizeCompanyUserRole(metadata.company_user_role || metadata.companyUserRole)];
+      })
+    );
+  } catch (_error) {
+    authUsersById = new Map<string, CompanyUserRole>();
+  }
+
+  const enrichedUsers = (data.users || []).map((user) => {
+    const row = user as Record<string, unknown>;
+    const role = normalizeUserRole(row.role);
+    const companyUserRole =
+      role === 'CLIENT'
+        ? authUsersById.get(String(row.id || '').trim()) || 'COMPANY_ADMIN'
+        : null;
+
+    return {
+      ...row,
+      company_user_role: companyUserRole,
+      companyUserRole
+    };
+  });
   const monthlyRecurring = (data.companies || []).reduce((sum, company) => {
     const plan = String((company as Record<string, unknown>).plan || 'BASIC').toUpperCase() as PlanName;
     return sum + getPlanPrice(plan === 'PRO' || plan === 'PREMIUM' ? plan : 'BASIC');
@@ -277,7 +349,8 @@ router.get('/dashboard', async (req, res) => {
     role: 'ADMIN',
     selectedCompanyId: companyId || null,
     monthlyRecurring,
-    ...data
+    ...data,
+    users: enrichedUsers
   });
 });
 
@@ -414,6 +487,7 @@ router.post('/users', async (req, res) => {
   const companyIdRaw = String(req.body?.companyId || '').trim();
   const companyName = String(req.body?.companyName || '').trim();
   const accessUntilRaw = req.body?.accessUntil;
+  const companyUserRole = normalizeCompanyUserRole(req.body?.companyUserRole);
   let accessUntil = accessUntilRaw ? String(accessUntilRaw) : null;
   let companyId = companyIdRaw || null;
 
@@ -459,6 +533,7 @@ router.post('/users', async (req, res) => {
       name,
       role,
       company_id: role === 'ADMIN' ? null : companyId,
+        company_user_role: role === 'CLIENT' ? companyUserRole : null,
       access_until: accessUntil
     }
   });
@@ -484,7 +559,8 @@ router.post('/users', async (req, res) => {
         id: authUser.id,
         email: authUser.email,
         role,
-        companyId
+        companyId,
+        companyUserRole: role === 'CLIENT' ? companyUserRole : null
       }
     });
   }
@@ -504,7 +580,8 @@ router.post('/users', async (req, res) => {
       id: authUser.id,
       email: authUser.email,
       role,
-      companyId: ensuredUser.companyId
+      companyId: ensuredUser.companyId,
+      companyUserRole: role === 'CLIENT' ? companyUserRole : null
     }
   });
 });
@@ -517,6 +594,7 @@ router.patch('/users/:userId', async (req, res) => {
   const companyIdRaw = req.body?.companyId;
   const companyName = String(req.body?.companyName || '').trim();
   const accessUntilRaw = req.body?.accessUntil;
+  const companyUserRole = req.body?.companyUserRole;
   const password = String(req.body?.password || '');
   let accessUntil = accessUntilRaw === undefined ? undefined : accessUntilRaw ? String(accessUntilRaw) : null;
 
@@ -575,6 +653,14 @@ router.patch('/users/:userId', async (req, res) => {
       role: nextRole,
       company_id: nextRole === 'ADMIN' ? null : nextCompanyId,
       company_name: companyName || undefined,
+      company_user_role:
+        nextRole === 'CLIENT'
+          ? normalizeCompanyUserRole(
+              companyUserRole === undefined
+                ? currentUser.company_user_role || currentUser.companyUserRole || 'COMPANY_ADMIN'
+                : companyUserRole
+            )
+          : null,
       access_until: accessUntil === undefined ? currentUser.access_until || currentUser.accessUntil || null : accessUntil
     }
   });

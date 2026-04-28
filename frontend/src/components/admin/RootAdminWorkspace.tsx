@@ -29,6 +29,7 @@ import {
 
 type CompanyPlan = 'BASIC' | 'PRO' | 'PREMIUM';
 type CompanyStatus = 'ACTIVE' | 'PAST_DUE' | 'CANCELED' | 'BLOCKED';
+type CompanyUserRole = 'COMPANY_ADMIN' | 'OPERATOR' | 'CASHIER';
 type AdminSection = 'overview' | 'companies' | 'users' | 'plans' | 'support';
 
 type CompanyRecord = {
@@ -40,6 +41,8 @@ type CompanyRecord = {
   subscriptionStatus?: CompanyStatus;
   expires_at?: string | null;
   expiresAt?: string | null;
+  created_at?: string | null;
+  createdAt?: string | null;
 };
 
 type ManagedUser = {
@@ -51,6 +54,27 @@ type ManagedUser = {
   companyId?: string | null;
   access_until?: string | null;
   accessUntil?: string | null;
+  company_user_role?: CompanyUserRole | null;
+  companyUserRole?: CompanyUserRole | null;
+};
+
+type CompanyMutationPayload = {
+  name: string;
+  location?: string | null;
+  plan: CompanyPlan;
+  status?: CompanyStatus;
+  expiresAt?: string | null;
+};
+
+type ManagedUserMutationPayload = {
+  name: string;
+  email: string;
+  password?: string;
+  role: 'ADMIN' | 'DEV' | 'CLIENT';
+  companyId?: string | null;
+  companyName?: string | null;
+  accessUntil?: string | null;
+  companyUserRole?: CompanyUserRole | null;
 };
 
 type CompanyOption = {
@@ -111,6 +135,12 @@ type Props = {
   toggleCompanyBlocked: (company: CompanyRecord) => void | Promise<void>;
   accessCompanyContext: (companyId: string) => void;
   toggleUserEnabled: (user: ManagedUser) => void | Promise<void>;
+  createCompany: (payload: CompanyMutationPayload) => Promise<CompanyRecord | null>;
+  updateCompany: (companyId: string, payload: CompanyMutationPayload) => Promise<boolean>;
+  deleteCompany: (companyId: string) => Promise<boolean>;
+  createManagedUser: (payload: ManagedUserMutationPayload) => Promise<boolean>;
+  updateManagedUser: (userId: string, payload: ManagedUserMutationPayload) => Promise<boolean>;
+  deleteManagedUser: (userId: string) => Promise<boolean>;
   openPlanEditor: (plan?: AdminPlanConfig) => void;
   savePlanEditor: () => void;
   deletePlanItem: (planId: string) => void;
@@ -196,7 +226,7 @@ const shell =
 
 const navigation: Array<{ id: RootSection; label: string; icon: typeof LayoutDashboard; sync: AdminSection }> = [
   { id: 'analytics', label: 'Dashboard', icon: LayoutDashboard, sync: 'overview' },
-  { id: 'users', label: 'Usuarios', icon: Users, sync: 'users' },
+  { id: 'users', label: 'Equipe do sistema', icon: Users, sync: 'users' },
   { id: 'companies', label: 'Empresas', icon: Building2, sync: 'companies' },
   { id: 'billing', label: 'Faturamento', icon: CreditCard, sync: 'plans' },
   { id: 'security', label: 'Seguranca', icon: Shield, sync: 'support' },
@@ -210,6 +240,24 @@ const permissionLabel: Record<PermissionLevel, string> = {
   admin: 'Admin',
   support: 'Suporte',
   success: 'CSM'
+};
+
+const systemRoleLabel: Record<'ADMIN' | 'DEV', string> = {
+  ADMIN: 'Admin',
+  DEV: 'Dev'
+};
+
+const companyUserRoleLabel: Record<CompanyUserRole, string> = {
+  COMPANY_ADMIN: 'Admin da empresa',
+  OPERATOR: 'Operador',
+  CASHIER: 'Caixa'
+};
+
+const companyStatusLabel: Record<CompanyStatus, string> = {
+  ACTIVE: 'Ativa',
+  PAST_DUE: 'Financeiro',
+  CANCELED: 'Cancelada',
+  BLOCKED: 'Inativa'
 };
 
 const fmtCurrency = (value: number) =>
@@ -306,10 +354,15 @@ const RootAdminWorkspace = ({
   planEditorFeatures,
   setPlanEditorFeatures,
   fetchAdminData,
-  setCompanyPlanQuick,
   toggleCompanyBlocked,
   accessCompanyContext,
   toggleUserEnabled,
+  createCompany,
+  updateCompany,
+  deleteCompany,
+  createManagedUser,
+  updateManagedUser,
+  deleteManagedUser,
   openPlanEditor,
   savePlanEditor,
   deletePlanItem,
@@ -328,7 +381,7 @@ const RootAdminWorkspace = ({
   const [globalSearch, setGlobalSearch] = useState('');
   const [userSearch, setUserSearch] = useState('');
   const [userStatusFilter, setUserStatusFilter] = useState<'Todos' | UserStatus>('Todos');
-  const [permissionFilter, setPermissionFilter] = useState<'Todos' | PermissionLevel>('Todos');
+  const [teamRoleFilter, setTeamRoleFilter] = useState<'Todos' | 'ADMIN' | 'DEV'>('Todos');
   const [companySearch, setCompanySearch] = useState('');
   const [companyStatusFilter, setCompanyStatusFilter] = useState<'Todos' | CompanyStatus>('Todos');
   const [billingFilter, setBillingFilter] = useState<'Todos' | PaymentRow['status']>('Todos');
@@ -338,6 +391,35 @@ const RootAdminWorkspace = ({
   const [pagePayments, setPagePayments] = useState(1);
   const [selectedUser, setSelectedUser] = useState<AdminUserRow | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<AdminCompanyRow | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [teamDialogOpen, setTeamDialogOpen] = useState(false);
+  const [editingTeamUserId, setEditingTeamUserId] = useState<string | null>(null);
+  const [teamFormName, setTeamFormName] = useState('');
+  const [teamFormEmail, setTeamFormEmail] = useState('');
+  const [teamFormPassword, setTeamFormPassword] = useState('');
+  const [teamFormRole, setTeamFormRole] = useState<'ADMIN' | 'DEV'>('ADMIN');
+  const [companyWizardOpen, setCompanyWizardOpen] = useState(false);
+  const [companyWizardStep, setCompanyWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [wizardCompanyName, setWizardCompanyName] = useState('');
+  const [wizardCompanyLocation, setWizardCompanyLocation] = useState('');
+  const [wizardCompanyPlan, setWizardCompanyPlan] = useState<CompanyPlan>('BASIC');
+  const [wizardCompanyStatus, setWizardCompanyStatus] = useState<CompanyStatus>('ACTIVE');
+  const [wizardCompanyExpiresAt, setWizardCompanyExpiresAt] = useState('');
+  const [wizardOwnerName, setWizardOwnerName] = useState('');
+  const [wizardOwnerEmail, setWizardOwnerEmail] = useState('');
+  const [wizardOwnerPassword, setWizardOwnerPassword] = useState('');
+  const [companyProfileName, setCompanyProfileName] = useState('');
+  const [companyProfileLocation, setCompanyProfileLocation] = useState('');
+  const [companyProfilePlan, setCompanyProfilePlan] = useState<CompanyPlan>('BASIC');
+  const [companyProfileStatus, setCompanyProfileStatus] = useState<CompanyStatus>('ACTIVE');
+  const [companyProfileExpiresAt, setCompanyProfileExpiresAt] = useState('');
+  const [companyUserEditorId, setCompanyUserEditorId] = useState<string | null>(null);
+  const [companyUserFormOpen, setCompanyUserFormOpen] = useState(false);
+  const [companyUserName, setCompanyUserName] = useState('');
+  const [companyUserEmail, setCompanyUserEmail] = useState('');
+  const [companyUserPassword, setCompanyUserPassword] = useState('');
+  const [companyUserRole, setCompanyUserRole] = useState<CompanyUserRole>('COMPANY_ADMIN');
+  const [companyUserAccessUntil, setCompanyUserAccessUntil] = useState('');
   const [criticalAction, setCriticalAction] = useState<CriticalAction | null>(null);
   const [criticalPayloadId, setCriticalPayloadId] = useState<string | null>(null);
   const [localBannerTitle, setLocalBannerTitle] = useState('Manutencao programada da API principal');
@@ -360,6 +442,322 @@ const RootAdminWorkspace = ({
     const timer = window.setTimeout(() => setLoadingSection(false), 320);
     return () => window.clearTimeout(timer);
   }, [currentSection]);
+
+  useEffect(() => {
+    if (!selectedCompany) {
+      return;
+    }
+
+    setCompanyProfileName(selectedCompany.name);
+    setCompanyProfileLocation(selectedCompany.location);
+    setCompanyProfilePlan(selectedCompany.plan);
+    setCompanyProfileStatus(selectedCompany.status);
+    setCompanyProfileExpiresAt(String(selectedCompany.expiresAt || '').slice(0, 10));
+    setCompanyUserEditorId(null);
+    setCompanyUserFormOpen(false);
+    setCompanyUserName('');
+    setCompanyUserEmail('');
+    setCompanyUserPassword('');
+    setCompanyUserRole('COMPANY_ADMIN');
+    setCompanyUserAccessUntil('');
+  }, [selectedCompany]);
+
+  const systemUsers = useMemo(
+    () => managedUsers.filter((user) => user.role === 'ADMIN' || user.role === 'DEV'),
+    [managedUsers]
+  );
+
+  const companyUsers = useMemo(
+    () => managedUsers.filter((user) => user.role === 'CLIENT'),
+    [managedUsers]
+  );
+
+  const managedCompanyRows = useMemo<AdminCompanyRow[]>(() => {
+    return companies.map((company) => {
+      const linkedUsers = companyUsers.filter(
+        (user) => String(user.company_id || user.companyId || '').trim() === String(company.id || '').trim()
+      );
+      const owner =
+        linkedUsers.find((user) => (user.company_user_role || user.companyUserRole || 'COMPANY_ADMIN') === 'COMPANY_ADMIN') ||
+        linkedUsers[0];
+
+      return {
+        id: company.id,
+        name: company.name,
+        location: company.location || 'Nao informado',
+        plan: (company.plan || 'BASIC') as CompanyPlan,
+        status: normalizeStatus(company.subscription_status || company.subscriptionStatus),
+        expiresAt: String(company.expires_at || company.expiresAt || ''),
+        users: linkedUsers.length,
+        usage: `${Math.max(8, Math.min(94, linkedUsers.length * 9 + 14))}%`,
+        owner: owner?.name || 'Sem responsavel',
+        source: 'real'
+      };
+    });
+  }, [companies, companyUsers]);
+
+  useEffect(() => {
+    if (!selectedCompany) {
+      return;
+    }
+
+    const refreshed = managedCompanyRows.find((company) => company.id === selectedCompany.id);
+
+    if (refreshed) {
+      setSelectedCompany(refreshed);
+    }
+  }, [managedCompanyRows, selectedCompany]);
+
+  const systemUserRows = useMemo<AdminUserRow[]>(() => {
+    return systemUsers.map((user, index) => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      companyId: null,
+      companyName: 'SYNCHO Core',
+      plan: 'PREMIUM',
+      status: 'Ativo',
+      permission: user.role === 'ADMIN' ? 'root' : 'admin',
+      lastActive: ['Agora', 'Hoje 09:12', 'Hoje 08:40', 'Ontem 22:18'][index % 4],
+      ip: ['177.91.12.10', '189.44.20.18', '200.160.2.11', '177.70.88.2'][index % 4],
+      source: 'real',
+      activity: [
+        user.role === 'ADMIN' ? 'Revisou governanca do sistema' : 'Atualizou integracoes internas',
+        'Acessou area administrativa root',
+        'Validou operacao de clientes'
+      ]
+    }));
+  }, [systemUsers]);
+
+  const selectedCompanyUsers = useMemo(() => {
+    if (!selectedCompany) {
+      return [] as ManagedUser[];
+    }
+
+    return companyUsers.filter(
+      (user) => String(user.company_id || user.companyId || '').trim() === String(selectedCompany.id || '').trim()
+    );
+  }, [companyUsers, selectedCompany]);
+
+  const resetTeamDialog = () => {
+    setEditingTeamUserId(null);
+    setTeamFormName('');
+    setTeamFormEmail('');
+    setTeamFormPassword('');
+    setTeamFormRole('ADMIN');
+    setTeamDialogOpen(false);
+  };
+
+  const openTeamDialog = (user?: ManagedUser) => {
+    if (!user) {
+      setEditingTeamUserId(null);
+      setTeamFormName('');
+      setTeamFormEmail('');
+      setTeamFormPassword('');
+      setTeamFormRole('ADMIN');
+      setTeamDialogOpen(true);
+      return;
+    }
+
+    setEditingTeamUserId(user.id);
+    setTeamFormName(user.name);
+    setTeamFormEmail(user.email);
+    setTeamFormPassword('');
+    setTeamFormRole(user.role === 'DEV' ? 'DEV' : 'ADMIN');
+    setTeamDialogOpen(true);
+  };
+
+  const resetCompanyWizard = () => {
+    setCompanyWizardOpen(false);
+    setCompanyWizardStep(1);
+    setWizardCompanyName('');
+    setWizardCompanyLocation('');
+    setWizardCompanyPlan('BASIC');
+    setWizardCompanyStatus('ACTIVE');
+    setWizardCompanyExpiresAt('');
+    setWizardOwnerName('');
+    setWizardOwnerEmail('');
+    setWizardOwnerPassword('');
+  };
+
+  const openCompanyUserEditor = (user?: ManagedUser) => {
+    setCompanyUserFormOpen(true);
+    if (!user) {
+      setCompanyUserEditorId(null);
+      setCompanyUserName('');
+      setCompanyUserEmail('');
+      setCompanyUserPassword('');
+      setCompanyUserRole('COMPANY_ADMIN');
+      setCompanyUserAccessUntil('');
+      return;
+    }
+
+    setCompanyUserEditorId(user.id);
+    setCompanyUserName(user.name);
+    setCompanyUserEmail(user.email);
+    setCompanyUserPassword('');
+    setCompanyUserRole((user.company_user_role || user.companyUserRole || 'COMPANY_ADMIN') as CompanyUserRole);
+    setCompanyUserAccessUntil(String(user.access_until || user.accessUntil || '').slice(0, 10));
+  };
+
+  const handleTeamSubmit = async () => {
+    if (!teamFormName.trim() || !teamFormEmail.trim() || (!editingTeamUserId && !teamFormPassword.trim())) {
+      showToast('Preencha nome, email e senha do usuario interno');
+      return;
+    }
+
+    setBusyAction('team-user');
+    const ok = editingTeamUserId
+      ? await updateManagedUser(editingTeamUserId, {
+          name: teamFormName,
+          email: teamFormEmail,
+          password: teamFormPassword || undefined,
+          role: teamFormRole
+        })
+      : await createManagedUser({
+          name: teamFormName,
+          email: teamFormEmail,
+          password: teamFormPassword,
+          role: teamFormRole
+        });
+    setBusyAction(null);
+
+    if (ok) {
+      resetTeamDialog();
+    }
+  };
+
+  const handleWizardAdvance = async () => {
+    if (companyWizardStep === 1 && !wizardCompanyName.trim()) {
+      showToast('Informe o nome da empresa');
+      return;
+    }
+
+    if (companyWizardStep === 2 && (!wizardOwnerName.trim() || !wizardOwnerEmail.trim() || !wizardOwnerPassword.trim())) {
+      showToast('Preencha o usuario principal da empresa');
+      return;
+    }
+
+    if (companyWizardStep < 4) {
+      setCompanyWizardStep((current) => (current + 1) as 1 | 2 | 3 | 4);
+      return;
+    }
+
+    setBusyAction('company-wizard');
+    const company = await createCompany({
+      name: wizardCompanyName,
+      location: wizardCompanyLocation,
+      plan: wizardCompanyPlan,
+      status: wizardCompanyStatus,
+      expiresAt: wizardCompanyExpiresAt || null
+    });
+
+    if (!company?.id) {
+      setBusyAction(null);
+      return;
+    }
+
+    const ownerCreated = await createManagedUser({
+      name: wizardOwnerName,
+      email: wizardOwnerEmail,
+      password: wizardOwnerPassword,
+      role: 'CLIENT',
+      companyId: company.id,
+      accessUntil: wizardCompanyExpiresAt || null,
+      companyUserRole: 'COMPANY_ADMIN'
+    });
+
+    setBusyAction(null);
+
+    if (ownerCreated) {
+      resetCompanyWizard();
+      setCurrentSection('companies');
+      setAdminSection('companies');
+      showToast('Empresa ativada com usuario principal');
+    }
+  };
+
+  const handleCompanyProfileSave = async () => {
+    if (!selectedCompany) {
+      return;
+    }
+
+    setBusyAction('company-profile');
+    const ok = await updateCompany(selectedCompany.id, {
+      name: companyProfileName,
+      location: companyProfileLocation,
+      plan: companyProfilePlan,
+      status: companyProfileStatus,
+      expiresAt: companyProfileExpiresAt || null
+    });
+    setBusyAction(null);
+
+    if (ok) {
+      setSelectedCompany((current) =>
+        current
+          ? {
+              ...current,
+              name: companyProfileName,
+              location: companyProfileLocation || 'Nao informado',
+              plan: companyProfilePlan,
+              status: companyProfileStatus,
+              expiresAt: companyProfileExpiresAt || current.expiresAt
+            }
+          : current
+      );
+    }
+  };
+
+  const handleCompanyUserSubmit = async () => {
+    if (!selectedCompany) {
+      return;
+    }
+
+    if (!companyUserName.trim() || !companyUserEmail.trim() || (!companyUserEditorId && !companyUserPassword.trim())) {
+      showToast('Preencha nome, email e senha do usuario da empresa');
+      return;
+    }
+
+    setBusyAction('company-user');
+    const ok = companyUserEditorId
+      ? await updateManagedUser(companyUserEditorId, {
+          name: companyUserName,
+          email: companyUserEmail,
+          password: companyUserPassword || undefined,
+          role: 'CLIENT',
+          companyId: selectedCompany.id,
+          accessUntil: companyUserAccessUntil || null,
+          companyUserRole
+        })
+      : await createManagedUser({
+          name: companyUserName,
+          email: companyUserEmail,
+          password: companyUserPassword,
+          role: 'CLIENT',
+          companyId: selectedCompany.id,
+          accessUntil: companyUserAccessUntil || null,
+          companyUserRole
+        });
+    setBusyAction(null);
+
+    if (ok) {
+      openCompanyUserEditor();
+    }
+  };
+
+  const handleDeleteSelectedCompany = async () => {
+    if (!selectedCompany || !window.confirm('Excluir esta empresa e todos os usuarios vinculados?')) {
+      return;
+    }
+
+    setBusyAction('delete-company');
+    const ok = await deleteCompany(selectedCompany.id);
+    setBusyAction(null);
+
+    if (ok) {
+      setSelectedCompany(null);
+    }
+  };
 
   const mockCompanies = useMemo<AdminCompanyRow[]>(() => {
     const realRows = companies.map((company, index) => ({
@@ -497,21 +895,23 @@ const RootAdminWorkspace = ({
   }, [apiUsage, globalSearch, mockCompanies, mockUsers]);
 
   const filteredUsers = useMemo(() => {
-    return mockUsers.filter((user) => {
-      const matchesSearch = `${user.name} ${user.email} ${user.companyName}`.toLowerCase().includes(userSearch.toLowerCase());
+    return systemUserRows.filter((user) => {
+      const matchesSearch = `${user.name} ${user.email}`.toLowerCase().includes(userSearch.toLowerCase());
       const matchesStatus = userStatusFilter === 'Todos' || user.status === userStatusFilter;
-      const matchesPermission = permissionFilter === 'Todos' || user.permission === permissionFilter;
-      return matchesSearch && matchesStatus && matchesPermission;
+      const matchesRole =
+        teamRoleFilter === 'Todos' ||
+        (teamRoleFilter === 'ADMIN' ? user.permission === 'root' : user.permission === 'admin');
+      return matchesSearch && matchesStatus && matchesRole;
     });
-  }, [mockUsers, permissionFilter, userSearch, userStatusFilter]);
+  }, [systemUserRows, teamRoleFilter, userSearch, userStatusFilter]);
 
   const filteredCompanies = useMemo(() => {
-    return mockCompanies.filter((company) => {
+    return managedCompanyRows.filter((company) => {
       const matchesSearch = `${company.name} ${company.location}`.toLowerCase().includes(companySearch.toLowerCase());
       const matchesStatus = companyStatusFilter === 'Todos' || company.status === companyStatusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [companySearch, companyStatusFilter, mockCompanies]);
+  }, [companySearch, companyStatusFilter, managedCompanyRows]);
 
   const filteredPayments = useMemo(() => {
     return payments.filter((payment) => billingFilter === 'Todos' || payment.status === billingFilter);
@@ -553,24 +953,6 @@ const RootAdminWorkspace = ({
     showToast('JSON de empresas exportado');
   };
 
-  const handleUserStatus = async (user: AdminUserRow) => {
-    const real = managedUsers.find((item) => item.id === user.id);
-    if (real) {
-      await toggleUserEnabled(real);
-      return;
-    }
-    showToast(user.status === 'Suspenso' ? 'Usuario mock reativado' : 'Usuario mock suspenso');
-  };
-
-  const handleCompanyPlan = async (company: AdminCompanyRow, plan: CompanyPlan) => {
-    const real = companies.find((item) => item.id === company.id);
-    if (real) {
-      await setCompanyPlanQuick(real, plan);
-      return;
-    }
-    showToast(`Plano de ${company.name} ajustado para ${plan}`);
-  };
-
   const handleCompanyBlock = async (company: AdminCompanyRow) => {
     const real = companies.find((item) => item.id === company.id);
     if (real) {
@@ -580,7 +962,10 @@ const RootAdminWorkspace = ({
     showToast(company.status === 'BLOCKED' ? 'Empresa mock desbloqueada' : 'Empresa mock bloqueada');
   };
 
-  const confirmCritical = () => {
+  const confirmCritical = async () => {
+    if (criticalAction === 'delete-user' && criticalPayloadId) {
+      await deleteManagedUser(criticalPayloadId);
+    }
     if (criticalAction === 'reset-api') {
       showToast('API global regenerada com sucesso');
     }
@@ -707,46 +1092,46 @@ const RootAdminWorkspace = ({
       const totalPages = Math.max(1, Math.ceil(filteredUsers.length / 8));
       return (
         <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <MiniStat label="Equipe interna" value={String(systemUsers.length)} hint="Somente ADMIN e DEV" icon={<Users className="h-5 w-5 text-white" />} accent="linear-gradient(135deg,#22d3ee,#2563eb)" isDarkTheme={isDarkTheme} />
+            <MiniStat label="Admins" value={String(systemUsers.filter((user) => user.role === 'ADMIN').length)} hint="Controle total do sistema" icon={<Shield className="h-5 w-5 text-white" />} accent="linear-gradient(135deg,#f59e0b,#ea580c)" isDarkTheme={isDarkTheme} />
+            <MiniStat label="Devs" value={String(systemUsers.filter((user) => user.role === 'DEV').length)} hint="Operacao tecnica interna" icon={<ServerCog className="h-5 w-5 text-white" />} accent="linear-gradient(135deg,#34d399,#059669)" isDarkTheme={isDarkTheme} />
+          </div>
+
           <SectionCard
-            title="Usuarios do ecossistema"
-            subtitle="CRUD completo com filtros, perfil, historico, permissao e exportacao."
+            title="Equipe do sistema"
+            subtitle="Gestao exclusiva de usuarios internos. Clientes nao aparecem aqui."
             isDarkTheme={isDarkTheme}
             actions={
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={exportUsers} className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-white/10">Exportar CSV</button>
-                <button type="button" onClick={() => showToast('Fluxo de convite pronto para backend')} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2 text-xs font-bold text-slate-950">Novo usuario</button>
+                <button type="button" onClick={() => openTeamDialog()} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2 text-xs font-bold text-slate-950">Novo usuario interno</button>
               </div>
             }
           >
-            <div className="grid gap-4 lg:grid-cols-[1fr_auto_auto_auto]">
+            <div className="grid gap-4 lg:grid-cols-[1fr_auto_auto]">
               <label className="relative block">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                <input value={userSearch} onChange={(event) => { setUserSearch(event.target.value); setPageUsers(1); }} placeholder="Buscar por nome, email ou empresa" className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-10 pr-4 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                <input value={userSearch} onChange={(event) => { setUserSearch(event.target.value); setPageUsers(1); }} placeholder="Buscar por nome ou email da equipe" className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-10 pr-4 text-sm text-slate-100 outline-none focus:border-cyan-400" />
               </label>
+              <select value={teamRoleFilter} onChange={(event) => { setTeamRoleFilter(event.target.value as 'Todos' | 'ADMIN' | 'DEV'); setPageUsers(1); }} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100">
+                <option>Todos</option>
+                <option value="ADMIN">Admin</option>
+                <option value="DEV">Dev</option>
+              </select>
               <select value={userStatusFilter} onChange={(event) => { setUserStatusFilter(event.target.value as 'Todos' | UserStatus); setPageUsers(1); }} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100">
                 <option>Todos</option>
                 <option>Ativo</option>
-                <option>Suspenso</option>
-                <option>Pendente</option>
               </select>
-              <select value={permissionFilter} onChange={(event) => { setPermissionFilter(event.target.value as 'Todos' | PermissionLevel); setPageUsers(1); }} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100">
-                <option>Todos</option>
-                <option value="root">Root</option>
-                <option value="admin">Admin</option>
-                <option value="support">Suporte</option>
-                <option value="success">CSM</option>
-              </select>
-              <button type="button" onClick={() => showToast('Filtros avancados prontos para backend')} className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-white/10">Filtros avancados</button>
             </div>
 
             <div className="mt-5 overflow-x-auto">
-              <table className="w-full min-w-[1120px] text-sm">
+              <table className="w-full min-w-[980px] text-sm">
                 <thead>
                   <tr className="border-b border-white/10 text-left text-[11px] uppercase tracking-[0.22em] text-slate-500">
                     <th className="px-3 py-3">Usuario</th>
-                    <th className="px-3 py-3">Empresa</th>
-                    <th className="px-3 py-3">Permissao</th>
-                    <th className="px-3 py-3">Plano</th>
+                    <th className="px-3 py-3">Cargo</th>
+                    <th className="px-3 py-3">Escopo</th>
                     <th className="px-3 py-3">Status</th>
                     <th className="px-3 py-3">Ultima atividade</th>
                     <th className="px-3 py-3 text-right">Acoes</th>
@@ -761,16 +1146,19 @@ const RootAdminWorkspace = ({
                           <p className="text-xs text-slate-400">{user.email} · {user.ip}</p>
                         </div>
                       </td>
-                      <td className="px-3 py-4 text-slate-300">{user.companyName}</td>
-                      <td className="px-3 py-4"><span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-cyan-200">{permissionLabel[user.permission]}</span></td>
-                      <td className="px-3 py-4 text-slate-300">{user.plan}</td>
+                      <td className="px-3 py-4"><span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-cyan-200">{user.permission === 'root' ? systemRoleLabel.ADMIN : systemRoleLabel.DEV}</span></td>
+                      <td className="px-3 py-4 text-slate-300">SYNCHO Core</td>
                       <td className="px-3 py-4"><span className={[ 'rounded-full px-3 py-1 text-xs font-semibold', user.status === 'Ativo' ? 'bg-emerald-500/15 text-emerald-300' : user.status === 'Suspenso' ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-500/15 text-amber-300' ].join(' ')}>{user.status}</span></td>
                       <td className="px-3 py-4 text-slate-300">{user.lastActive}</td>
                       <td className="px-3 py-4">
                         <div className="flex justify-end gap-2">
                           <button type="button" onClick={() => setSelectedUser(user)} className="rounded-xl border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10">Ver perfil</button>
-                          <button type="button" onClick={() => showToast(`Reset de senha enviado para ${user.email}`)} className="rounded-xl border border-amber-400/20 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/10">Resetar senha</button>
-                          <button type="button" onClick={() => void handleUserStatus(user)} className="rounded-xl border border-white/10 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-white/10">{user.status === 'Suspenso' ? 'Ativar' : 'Suspender'}</button>
+                          <button type="button" onClick={() => {
+                            const original = systemUsers.find((item) => item.id === user.id);
+                            if (original) {
+                              openTeamDialog(original);
+                            }
+                          }} className="rounded-xl border border-cyan-400/30 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10">Editar</button>
                           <button type="button" onClick={() => { setCriticalAction('delete-user'); setCriticalPayloadId(user.id); }} className="rounded-xl border border-rose-400/30 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/10">Excluir</button>
                         </div>
                       </td>
@@ -796,84 +1184,93 @@ const RootAdminWorkspace = ({
     if (currentSection === 'companies') {
       const totalPages = Math.max(1, Math.ceil(filteredCompanies.length / 7));
       return (
-        <SectionCard
-          title="Empresas SaaS"
-          subtitle="Gestao completa de clientes, dados, usuarios vinculados e logs de uso."
-          isDarkTheme={isDarkTheme}
-          actions={
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={exportCompanies} className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-white/10">Exportar JSON</button>
-              <button type="button" onClick={() => void triggerRefresh()} className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">Atualizar</button>
-            </div>
-          }
-        >
-          <div className="grid gap-4 lg:grid-cols-[1fr_auto_auto]">
-            <label className="relative block">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-              <input value={companySearch} onChange={(event) => { setCompanySearch(event.target.value); setPageCompanies(1); }} placeholder="Buscar empresa ou localizacao" className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-10 pr-4 text-sm text-slate-100 outline-none focus:border-cyan-400" />
-            </label>
-            <select value={companyStatusFilter} onChange={(event) => { setCompanyStatusFilter(event.target.value as 'Todos' | CompanyStatus); setPageCompanies(1); }} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100">
-              <option>Todos</option>
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="PAST_DUE">PAST_DUE</option>
-              <option value="CANCELED">CANCELED</option>
-              <option value="BLOCKED">BLOCKED</option>
-            </select>
-            <button type="button" onClick={() => showToast('Criacao de empresa pronta para backend')} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-3 text-xs font-bold text-slate-950">Nova empresa</button>
+        <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <MiniStat label="Empresas" value={String(managedCompanyRows.length)} hint="Base total de clientes SaaS" icon={<Building2 className="h-5 w-5 text-white" />} accent="linear-gradient(135deg,#22d3ee,#2563eb)" isDarkTheme={isDarkTheme} />
+            <MiniStat label="Ativas" value={String(managedCompanyRows.filter((company) => company.status === 'ACTIVE').length)} hint="Contas prontas para operar" icon={<BadgeCheck className="h-5 w-5 text-white" />} accent="linear-gradient(135deg,#34d399,#059669)" isDarkTheme={isDarkTheme} />
+            <MiniStat label="Usuarios da base" value={String(companyUsers.length)} hint="Usuarios vinculados a empresas" icon={<Users className="h-5 w-5 text-white" />} accent="linear-gradient(135deg,#f59e0b,#ea580c)" isDarkTheme={isDarkTheme} />
           </div>
 
-          <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[1080px] text-sm">
-              <thead>
-                <tr className="border-b border-white/10 text-left text-[11px] uppercase tracking-[0.22em] text-slate-500">
-                  <th className="px-3 py-3">Empresa</th>
-                  <th className="px-3 py-3">Plano</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3">Usuarios</th>
-                  <th className="px-3 py-3">Uso</th>
-                  <th className="px-3 py-3">Expira em</th>
-                  <th className="px-3 py-3 text-right">Acoes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagedCompanies.map((company) => (
-                  <tr key={company.id} className="border-b border-white/5">
-                    <td className="px-3 py-4">
-                      <p className="font-semibold text-white">{company.name}</p>
-                      <p className="text-xs text-slate-400">{company.location} · owner {company.owner}</p>
-                    </td>
-                    <td className="px-3 py-4">
-                      <select value={company.plan} onChange={(event) => void handleCompanyPlan(company, event.target.value as CompanyPlan)} className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-100">
-                        <option value="BASIC">BASIC</option>
-                        <option value="PRO">PRO</option>
-                        <option value="PREMIUM">PREMIUM</option>
-                      </select>
-                    </td>
-                    <td className="px-3 py-4"><span className={[ 'rounded-full px-3 py-1 text-xs font-semibold', company.status === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-300' : company.status === 'BLOCKED' ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-500/15 text-amber-300' ].join(' ')}>{company.status}</span></td>
-                    <td className="px-3 py-4 text-slate-300">{company.users}</td>
-                    <td className="px-3 py-4 text-slate-300">{company.usage}</td>
-                    <td className="px-3 py-4 text-slate-300">{fmtDate(company.expiresAt)}</td>
-                    <td className="px-3 py-4">
-                      <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => setSelectedCompany(company)} className="rounded-xl border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10">Ver dados</button>
-                        <button type="button" onClick={() => accessCompanyContext(company.id)} className="rounded-xl border border-cyan-400/30 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10">Contexto</button>
-                        <button type="button" onClick={() => void handleCompanyBlock(company)} className="rounded-xl border border-rose-400/30 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/10">{company.status === 'BLOCKED' ? 'Desbloquear' : 'Bloquear'}</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-xs text-slate-500">{filteredCompanies.length} empresas listadas</span>
-            <div className="flex items-center gap-2">
-              <button type="button" disabled={pageCompanies === 1} onClick={() => setPageCompanies((current) => Math.max(1, current - 1))} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 disabled:opacity-40">Anterior</button>
-              <span className="text-xs font-semibold text-slate-400">Pagina {pageCompanies} de {totalPages}</span>
-              <button type="button" disabled={pageCompanies === totalPages} onClick={() => setPageCompanies((current) => Math.min(totalPages, current + 1))} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 disabled:opacity-40">Proxima</button>
+          <SectionCard
+            title="Empresas"
+            subtitle="Gestao visual da carteira de clientes com onboarding e gerenciamento por empresa."
+            isDarkTheme={isDarkTheme}
+            actions={
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={exportCompanies} className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-white/10">Exportar JSON</button>
+                <button type="button" onClick={() => void triggerRefresh()} className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">Atualizar</button>
+                <button type="button" onClick={() => { resetCompanyWizard(); setCompanyWizardOpen(true); }} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2 text-xs font-bold text-slate-950">Novo onboarding</button>
+              </div>
+            }
+          >
+            <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
+              <label className="relative block">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <input value={companySearch} onChange={(event) => { setCompanySearch(event.target.value); setPageCompanies(1); }} placeholder="Buscar empresa" className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-10 pr-4 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+              </label>
+              <select value={companyStatusFilter} onChange={(event) => { setCompanyStatusFilter(event.target.value as 'Todos' | CompanyStatus); setPageCompanies(1); }} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100">
+                <option>Todos</option>
+                <option value="ACTIVE">Ativa</option>
+                <option value="PAST_DUE">Financeiro</option>
+                <option value="CANCELED">Cancelada</option>
+                <option value="BLOCKED">Inativa</option>
+              </select>
             </div>
-          </div>
-        </SectionCard>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              {pagedCompanies.map((company) => {
+                const companyRecord = companies.find((item) => item.id === company.id);
+                const createdAt = String(companyRecord?.created_at || companyRecord?.createdAt || '');
+
+                return (
+                  <motion.div key={company.id} whileHover={{ y: -4 }} className="rounded-[26px] border border-white/10 bg-black/20 p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <p className="text-lg font-black text-white">{company.name}</p>
+                        <p className="mt-1 text-sm text-slate-400">{company.location} · {company.users} usuarios</p>
+                      </div>
+                      <span className={[ 'rounded-full px-3 py-1 text-xs font-semibold', company.status === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-300' : company.status === 'BLOCKED' ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-500/15 text-amber-300' ].join(' ')}>{companyStatusLabel[company.status]}</span>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Plano</p>
+                        <p className="mt-2 text-sm font-semibold text-white">{company.plan}</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Criada em</p>
+                        <p className="mt-2 text-sm font-semibold text-white">{createdAt ? fmtDate(createdAt) : 'Nao informado'}</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Responsavel</p>
+                        <p className="mt-2 text-sm font-semibold text-white">{company.owner}</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Expiracao</p>
+                        <p className="mt-2 text-sm font-semibold text-white">{company.expiresAt ? fmtDate(company.expiresAt) : 'Em aberto'}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setSelectedCompany(company)} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2 text-xs font-bold text-slate-950">Gerenciar empresa</button>
+                      <button type="button" onClick={() => accessCompanyContext(company.id)} className="rounded-2xl border border-cyan-400/30 px-4 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10">Abrir contexto</button>
+                      <button type="button" onClick={() => void handleCompanyBlock(company)} className="rounded-2xl border border-rose-400/30 px-4 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/10">{company.status === 'BLOCKED' ? 'Ativar conta' : 'Inativar conta'}</button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <span className="text-xs text-slate-500">{filteredCompanies.length} empresas listadas</span>
+              <div className="flex items-center gap-2">
+                <button type="button" disabled={pageCompanies === 1} onClick={() => setPageCompanies((current) => Math.max(1, current - 1))} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 disabled:opacity-40">Anterior</button>
+                <span className="text-xs font-semibold text-slate-400">Pagina {pageCompanies} de {totalPages}</span>
+                <button type="button" disabled={pageCompanies === totalPages} onClick={() => setPageCompanies((current) => Math.min(totalPages, current + 1))} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 disabled:opacity-40">Proxima</button>
+              </div>
+            </div>
+          </SectionCard>
+        </div>
       );
     }
 
@@ -1304,22 +1701,23 @@ const RootAdminWorkspace = ({
       <AnimatePresence>
         {selectedCompany ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/70 p-4 backdrop-blur-sm">
-            <motion.div initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.98 }} className={[shell, 'w-full max-w-4xl p-6'].join(' ')}>
+            <motion.div initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.98 }} className={[shell, 'w-full max-w-6xl p-6'].join(' ')}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-300">Workspace cliente</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-300">Gerenciar empresa</p>
                   <h3 className="mt-2 text-2xl font-black text-white">{selectedCompany.name}</h3>
-                  <p className="mt-1 text-sm text-slate-400">{selectedCompany.location} · owner {selectedCompany.owner}</p>
+                  <p className="mt-1 text-sm text-slate-400">{selectedCompany.location} · {selectedCompany.users} usuarios vinculados</p>
                 </div>
                 <button type="button" onClick={() => setSelectedCompany(null)} className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">Fechar</button>
               </div>
-              <div className="mt-6 grid gap-5 lg:grid-cols-2">
+
+              <div className="mt-6 grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
                 <div className="grid gap-3">
                   {[
                     ['Plano', selectedCompany.plan],
-                    ['Status', selectedCompany.status],
+                    ['Status', companyStatusLabel[selectedCompany.status]],
                     ['Usuarios vinculados', String(selectedCompany.users)],
-                    ['Uso atual', selectedCompany.usage],
+                    ['Responsavel', selectedCompany.owner],
                     ['Expiracao', fmtDate(selectedCompany.expiresAt)]
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -1328,17 +1726,198 @@ const RootAdminWorkspace = ({
                     </div>
                   ))}
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Usuarios vinculados</p>
-                  <div className="mt-4 grid gap-3">
-                    {mockUsers.filter((user) => user.companyId === selectedCompany.id).slice(0, 6).map((user) => (
-                      <div key={user.id} className="rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3">
-                        <p className="text-sm font-semibold text-white">{user.name}</p>
-                        <p className="mt-1 text-xs text-slate-400">{user.email} · {permissionLabel[user.permission]}</p>
+                <div className="space-y-5">
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Conta da empresa</p>
+                        <p className="mt-1 text-sm text-slate-400">Atualize nome, plano, status e validade sem mostrar IDs brutos.</p>
                       </div>
-                    ))}
+                      <button type="button" onClick={handleDeleteSelectedCompany} className="rounded-2xl border border-rose-400/30 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/10">Excluir empresa</button>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <input value={companyProfileName} onChange={(event) => setCompanyProfileName(event.target.value)} placeholder="Nome da empresa" className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                      <input value={companyProfileLocation} onChange={(event) => setCompanyProfileLocation(event.target.value)} placeholder="Localizacao" className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                      <select value={companyProfilePlan} onChange={(event) => setCompanyProfilePlan(event.target.value as CompanyPlan)} className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100">
+                        <option value="BASIC">BASIC</option>
+                        <option value="PRO">PRO</option>
+                        <option value="PREMIUM">PREMIUM</option>
+                      </select>
+                      <select value={companyProfileStatus} onChange={(event) => setCompanyProfileStatus(event.target.value as CompanyStatus)} className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100">
+                        <option value="ACTIVE">Ativa</option>
+                        <option value="BLOCKED">Inativa</option>
+                        <option value="PAST_DUE">Financeiro</option>
+                        <option value="CANCELED">Cancelada</option>
+                      </select>
+                      <input value={companyProfileExpiresAt} onChange={(event) => setCompanyProfileExpiresAt(event.target.value)} type="date" className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400 md:col-span-2" />
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button type="button" disabled={busyAction === 'company-profile'} onClick={() => void handleCompanyProfileSave()} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2 text-xs font-bold text-slate-950 disabled:opacity-60">Salvar empresa</button>
+                      <button type="button" onClick={() => accessCompanyContext(selectedCompany.id)} className="rounded-2xl border border-cyan-400/30 px-4 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10">Abrir contexto</button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Usuarios da empresa</p>
+                        <p className="mt-1 text-sm text-slate-400">Roles disponiveis: admin da empresa, operador e caixa.</p>
+                      </div>
+                      <button type="button" onClick={() => openCompanyUserEditor()} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2 text-xs font-bold text-slate-950">Novo usuario</button>
+                    </div>
+
+                    {companyUserFormOpen ? (
+                      <div className="mt-4 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-4">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <input value={companyUserName} onChange={(event) => setCompanyUserName(event.target.value)} placeholder="Nome completo" className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                          <input value={companyUserEmail} onChange={(event) => setCompanyUserEmail(event.target.value)} placeholder="Email" className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                          <input value={companyUserPassword} onChange={(event) => setCompanyUserPassword(event.target.value)} placeholder={companyUserEditorId ? 'Nova senha (opcional)' : 'Senha inicial'} type="password" className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                          <select value={companyUserRole} onChange={(event) => setCompanyUserRole(event.target.value as CompanyUserRole)} className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100">
+                            <option value="COMPANY_ADMIN">Admin da empresa</option>
+                            <option value="OPERATOR">Operador</option>
+                            <option value="CASHIER">Caixa</option>
+                          </select>
+                          <input value={companyUserAccessUntil} onChange={(event) => setCompanyUserAccessUntil(event.target.value)} type="date" className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400 md:col-span-2" />
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button type="button" disabled={busyAction === 'company-user'} onClick={() => void handleCompanyUserSubmit()} className="rounded-2xl bg-slate-950 px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{companyUserEditorId ? 'Salvar usuario' : 'Criar usuario'}</button>
+                          <button type="button" onClick={() => openCompanyUserEditor()} className="rounded-2xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">Limpar</button>
+                          <button type="button" onClick={() => setCompanyUserFormOpen(false)} className="rounded-2xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">Fechar formulario</button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 space-y-3">
+                      {selectedCompanyUsers.length ? selectedCompanyUsers.map((user) => {
+                        const accessUntil = String(user.access_until || user.accessUntil || '').trim();
+                        const isInactive = Boolean(accessUntil && new Date(accessUntil).getTime() < Date.now());
+                        return (
+                          <div key={user.id} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-white">{user.name}</p>
+                                <p className="mt-1 text-xs text-slate-400">{user.email}</p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-cyan-200">{companyUserRoleLabel[(user.company_user_role || user.companyUserRole || 'COMPANY_ADMIN') as CompanyUserRole]}</span>
+                                  <span className={[ 'rounded-full px-3 py-1 text-[11px] font-semibold', isInactive ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300' ].join(' ')}>{isInactive ? 'Inativo' : 'Ativo'}</span>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button type="button" onClick={() => openCompanyUserEditor(user)} className="rounded-xl border border-cyan-400/30 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/10">Editar</button>
+                                <button type="button" onClick={() => void toggleUserEnabled(user)} className="rounded-xl border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10">{isInactive ? 'Reativar' : 'Desativar'}</button>
+                                <button type="button" onClick={() => { setCriticalAction('delete-user'); setCriticalPayloadId(user.id); }} className="rounded-xl border border-rose-400/30 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/10">Excluir</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }) : (
+                        <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/40 px-4 py-6 text-sm text-slate-400">Nenhum usuario da empresa cadastrado ainda.</div>
+                      )}
+                    </div>
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {teamDialogOpen ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[92] grid place-items-center bg-slate-950/70 p-4 backdrop-blur-sm">
+            <motion.div initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} className={[shell, 'w-full max-w-2xl p-6'].join(' ')}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-300">Equipe do sistema</p>
+                  <h3 className="mt-2 text-2xl font-black text-white">{editingTeamUserId ? 'Editar usuario interno' : 'Novo usuario interno'}</h3>
+                  <p className="mt-1 text-sm text-slate-400">Somente ADMIN e DEV entram nesta area.</p>
+                </div>
+                <button type="button" onClick={resetTeamDialog} className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">Fechar</button>
+              </div>
+
+              <div className="mt-6 grid gap-3 md:grid-cols-2">
+                <input value={teamFormName} onChange={(event) => setTeamFormName(event.target.value)} placeholder="Nome" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                <input value={teamFormEmail} onChange={(event) => setTeamFormEmail(event.target.value)} placeholder="Email" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                <input value={teamFormPassword} onChange={(event) => setTeamFormPassword(event.target.value)} type="password" placeholder={editingTeamUserId ? 'Nova senha (opcional)' : 'Senha inicial'} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                <select value={teamFormRole} onChange={(event) => setTeamFormRole(event.target.value as 'ADMIN' | 'DEV')} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100">
+                  <option value="ADMIN">Admin</option>
+                  <option value="DEV">Dev</option>
+                </select>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button type="button" onClick={resetTeamDialog} className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/10">Cancelar</button>
+                <button type="button" disabled={busyAction === 'team-user'} onClick={() => void handleTeamSubmit()} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2.5 text-sm font-bold text-slate-950 disabled:opacity-60">{editingTeamUserId ? 'Salvar usuario' : 'Criar usuario'}</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {companyWizardOpen ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[93] grid place-items-center bg-slate-950/75 p-4 backdrop-blur-sm">
+            <motion.div initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} className={[shell, 'w-full max-w-3xl p-6'].join(' ')}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-300">Onboarding de cliente</p>
+                  <h3 className="mt-2 text-2xl font-black text-white">Criar empresa com fluxo SaaS</h3>
+                  <p className="mt-1 text-sm text-slate-400">1. Empresa 2. Usuario principal 3. Plano 4. Ativacao</p>
+                </div>
+                <button type="button" onClick={resetCompanyWizard} className="rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">Fechar</button>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-4">
+                {[1, 2, 3, 4].map((step) => (
+                  <div key={step} className={[ 'rounded-2xl border px-4 py-3 text-center text-xs font-semibold', companyWizardStep === step ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200' : 'border-white/10 bg-black/20 text-slate-400' ].join(' ')}>
+                    Etapa {step}
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6">
+                {companyWizardStep === 1 ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <input value={wizardCompanyName} onChange={(event) => setWizardCompanyName(event.target.value)} placeholder="Nome da empresa" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                    <input value={wizardCompanyLocation} onChange={(event) => setWizardCompanyLocation(event.target.value)} placeholder="Localizacao" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                  </div>
+                ) : null}
+
+                {companyWizardStep === 2 ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <input value={wizardOwnerName} onChange={(event) => setWizardOwnerName(event.target.value)} placeholder="Usuario principal" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                    <input value={wizardOwnerEmail} onChange={(event) => setWizardOwnerEmail(event.target.value)} placeholder="Email do usuario principal" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                    <input value={wizardOwnerPassword} onChange={(event) => setWizardOwnerPassword(event.target.value)} type="password" placeholder="Senha inicial" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400 md:col-span-2" />
+                  </div>
+                ) : null}
+
+                {companyWizardStep === 3 ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <select value={wizardCompanyPlan} onChange={(event) => setWizardCompanyPlan(event.target.value as CompanyPlan)} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100">
+                      <option value="BASIC">BASIC</option>
+                      <option value="PRO">PRO</option>
+                      <option value="PREMIUM">PREMIUM</option>
+                    </select>
+                    <input value={wizardCompanyExpiresAt} onChange={(event) => setWizardCompanyExpiresAt(event.target.value)} type="date" className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-cyan-400" />
+                  </div>
+                ) : null}
+
+                {companyWizardStep === 4 ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <select value={wizardCompanyStatus} onChange={(event) => setWizardCompanyStatus(event.target.value as CompanyStatus)} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100">
+                      <option value="ACTIVE">Ativar conta agora</option>
+                      <option value="BLOCKED">Criar como inativa</option>
+                    </select>
+                    <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">Usuario principal sera criado como admin da empresa.</div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-6 flex justify-between gap-3">
+                <button type="button" disabled={companyWizardStep === 1} onClick={() => setCompanyWizardStep((current) => Math.max(1, current - 1) as 1 | 2 | 3 | 4)} className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-40">Voltar</button>
+                <button type="button" disabled={busyAction === 'company-wizard'} onClick={() => void handleWizardAdvance()} className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2.5 text-sm font-bold text-slate-950 disabled:opacity-60">{companyWizardStep === 4 ? 'Criar empresa' : 'Continuar'}</button>
               </div>
             </motion.div>
           </motion.div>

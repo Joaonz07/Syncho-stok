@@ -117,6 +117,7 @@ router.post('/register', async (req, res) => {
 				name,
 				role: 'CLIENT',
 				company_id: companyId,
+				company_user_role: 'COMPANY_ADMIN',
 				company_name: companyName,
 				logo_url: logoUrl,
 				primary_color: primaryColor
