@@ -42,6 +42,10 @@ import {
   Download,
   ReceiptText
 } from 'lucide-react';
+import AgendaCalendarWorkspace from '../components/modules/AgendaCalendarWorkspace';
+import BudgetsWorkspace from '../components/modules/BudgetsWorkspace';
+import CmsPagesWorkspace from '../components/modules/CmsPagesWorkspace';
+import TasksKanbanWorkspace from '../components/modules/TasksKanbanWorkspace';
 import RootAdminWorkspace from '../components/admin/RootAdminWorkspace';
 import SettingsWorkspace from '../components/settings/SettingsWorkspace';
 
@@ -173,7 +177,7 @@ type AdminPlanConfig = {
   features: string[];
 };
 
-type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat' | 'analytics' | 'admin' | 'integrations';
+type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat' | 'analytics' | 'admin' | 'integrations' | 'tasks' | 'agenda' | 'budgets' | 'pages';
 type SidebarPath = DashboardView | 'pdv';
 
 type SidebarGroup = 'Comercial' | 'Operacao' | 'Sistema';
@@ -4077,14 +4081,14 @@ const Dashboard = () => {
       { name: 'Dashboard', icon: LayoutDashboard, path: 'admin', group: 'Comercial', adminOnly: true },
       { name: 'Clientes', icon: Users, path: 'clients', group: 'Comercial', adminOnly: true },
       { name: 'Pipelines', icon: KanbanSquare, path: 'pipeline', group: 'Comercial', adminOnly: true },
-      { name: 'Tarefas', icon: Activity, path: 'admin', group: 'Comercial', adminOnly: true },
-      { name: 'Agenda', icon: BarChart3, path: 'sales', group: 'Comercial', adminOnly: true },
+      { name: 'Tarefas', icon: Activity, path: 'tasks', group: 'Comercial', adminOnly: true },
+      { name: 'Agenda', icon: BarChart3, path: 'agenda', group: 'Comercial', adminOnly: true },
       { name: 'Financeiro', icon: DollarSign, path: 'analytics', group: 'Comercial', adminOnly: true },
       { name: 'Servicos', icon: Package, path: 'products', group: 'Operacao', adminOnly: true },
       { name: 'PDV', icon: ReceiptText, path: 'pdv', group: 'Operacao', adminOnly: true },
-      { name: 'Orcamentos', icon: CreditCard, path: 'sales', group: 'Operacao', adminOnly: true },
+      { name: 'Orcamentos', icon: CreditCard, path: 'budgets', group: 'Operacao', adminOnly: true },
       { name: 'Briefings', icon: Sparkles, path: 'companies', group: 'Operacao', adminOnly: true },
-      { name: 'Paginas', icon: LayoutDashboard, path: 'settings', group: 'Operacao', adminOnly: true },
+      { name: 'Paginas', icon: LayoutDashboard, path: 'pages', group: 'Operacao', adminOnly: true },
       { name: 'Equipe', icon: Users, path: 'clients', group: 'Sistema', adminOnly: true },
       { name: 'WhatsApp', icon: MessageCircle, path: 'chat', group: 'Sistema', adminOnly: true },
       { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema', adminOnly: true }
@@ -4119,8 +4123,7 @@ const Dashboard = () => {
 
     if (role === 'ADMIN' && item.path === 'admin') {
       const sectionByMenuName: Record<string, 'overview' | 'companies' | 'users' | 'plans' | 'support'> = {
-        Dashboard: 'overview',
-        Tarefas: 'support'
+        Dashboard: 'overview'
       };
 
       setAdminSection(sectionByMenuName[item.name] || 'overview');
@@ -4965,6 +4968,22 @@ const Dashboard = () => {
               deletePlanItem={deletePlanItem}
               showToast={showToast}
             />
+          ) : null}
+
+          {role === 'ADMIN' && activeView === 'tasks' ? (
+            <TasksKanbanWorkspace showToast={showToast} />
+          ) : null}
+
+          {role === 'ADMIN' && activeView === 'agenda' ? (
+            <AgendaCalendarWorkspace showToast={showToast} />
+          ) : null}
+
+          {role === 'ADMIN' && activeView === 'budgets' ? (
+            <BudgetsWorkspace showToast={showToast} />
+          ) : null}
+
+          {role === 'ADMIN' && activeView === 'pages' ? (
+            <CmsPagesWorkspace showToast={showToast} />
           ) : null}
 
           {role === 'ADMIN' && activeView === 'companies' ? (
@@ -6571,7 +6590,7 @@ const Dashboard = () => {
             </div>
           ) : null}
 
-          {role === 'ADMIN' || activeView === 'products' || activeView === 'inventory' || activeView === 'settings' || activeView === 'chat' || activeView === 'sales' || activeView === 'analytics' || activeView === 'integrations' ? (
+          {role === 'ADMIN' || activeView === 'products' || activeView === 'inventory' || activeView === 'settings' || activeView === 'chat' || activeView === 'sales' || activeView === 'analytics' || activeView === 'integrations' || activeView === 'tasks' || activeView === 'agenda' || activeView === 'budgets' || activeView === 'pages' ? (
             <p className={['mt-4 text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>{adminLoading ? 'Sincronizando área administrativa...' : status}</p>
           ) : null}
 
