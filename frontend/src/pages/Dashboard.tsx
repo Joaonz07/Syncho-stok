@@ -941,6 +941,12 @@ const Dashboard = () => {
     : 'rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400';
   const themedSelectClass = themedInputClass;
   const themedOptionClass = isDarkTheme ? 'bg-slate-900 text-slate-100' : '';
+  const themedSelectNativeStyle = isDarkTheme
+    ? ({ backgroundColor: '#0f172a', color: '#f8fafc', colorScheme: 'dark' } as const)
+    : undefined;
+  const themedOptionNativeStyle = isDarkTheme
+    ? ({ backgroundColor: '#0f172a', color: '#f8fafc' } as const)
+    : undefined;
   const themedTitleClass = isDarkTheme ? 'text-2xl font-black text-white' : 'text-2xl font-black text-slate-800';
   const themedSubtextClass = isDarkTheme ? 'text-sm text-slate-300' : 'text-sm text-slate-500';
   const canOpenSupportChat = Boolean(selectedSupportRequestId);
@@ -5431,10 +5437,10 @@ const Dashboard = () => {
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   {role === 'ADMIN' ? (
-                    <select className={themedSelectClass} value={productCompanyId} onChange={(event) => setProductCompanyId(event.target.value)}>
-                      <option className={themedOptionClass} value="">Selecione a empresa</option>
+                    <select className={themedSelectClass} value={productCompanyId} onChange={(event) => setProductCompanyId(event.target.value)} style={themedSelectNativeStyle}>
+                      <option className={themedOptionClass} value="" style={themedOptionNativeStyle}>Selecione a empresa</option>
                       {companyOptions.map((option) => (
-                        <option className={themedOptionClass} key={option.id} value={option.id}>{option.name}</option>
+                        <option className={themedOptionClass} key={option.id} value={option.id} style={themedOptionNativeStyle}>{option.name}</option>
                       ))}
                     </select>
                   ) : null}
@@ -5606,10 +5612,11 @@ const Dashboard = () => {
                         className={['min-w-[220px] rounded-xl border px-3 py-2 text-sm outline-none transition-all', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400'].join(' ')}
                         value={integrationCompanyId}
                         onChange={(event) => setIntegrationCompanyId(event.target.value)}
+                        style={themedSelectNativeStyle}
                       >
-                        <option value="">Selecione a empresa</option>
+                        <option value="" style={themedOptionNativeStyle}>Selecione a empresa</option>
                         {companyOptions.map((option) => (
-                          <option key={option.id} value={option.id}>{option.name}</option>
+                          <option key={option.id} value={option.id} style={themedOptionNativeStyle}>{option.name}</option>
                         ))}
                       </select>
                     ) : null}
@@ -5921,10 +5928,11 @@ const Dashboard = () => {
                       className={['rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
                       value={settingsCompanyId}
                       onChange={(event) => setSettingsCompanyId(event.target.value)}
+                      style={themedSelectNativeStyle}
                     >
-                      <option value="">Selecione a empresa</option>
+                      <option value="" style={themedOptionNativeStyle}>Selecione a empresa</option>
                       {companyOptions.map((option) => (
-                        <option key={option.id} value={option.id}>{option.name}</option>
+                        <option key={option.id} value={option.id} style={themedOptionNativeStyle}>{option.name}</option>
                       ))}
                     </select>
                     <div className="flex gap-2">
@@ -5932,10 +5940,11 @@ const Dashboard = () => {
                         className={['flex-1 rounded-xl border px-3 py-2 text-sm outline-none transition-all focus:ring-2', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100 focus:border-blue-500 focus:ring-blue-500/30' : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-400 focus:ring-blue-400/20'].join(' ')}
                         value={settingsPlan}
                         onChange={(event) => setSettingsPlan(event.target.value as CompanyPlan)}
+                        style={themedSelectNativeStyle}
                       >
-                        <option value="BASIC">BASIC</option>
-                        <option value="PRO">PRO</option>
-                        <option value="PREMIUM">PREMIUM</option>
+                        <option value="BASIC" style={themedOptionNativeStyle}>BASIC</option>
+                        <option value="PRO" style={themedOptionNativeStyle}>PRO</option>
+                        <option value="PREMIUM" style={themedOptionNativeStyle}>PREMIUM</option>
                       </select>
                       <input
                         type="date"
@@ -6414,10 +6423,11 @@ const Dashboard = () => {
                       ].join(' ')}
                       value={salesCompanyId}
                       onChange={(event) => setSalesCompanyId(event.target.value)}
+                      style={themedSelectNativeStyle}
                     >
-                      <option className={isDarkTheme ? 'bg-slate-900 text-slate-100' : ''} value="">Selecione a empresa</option>
+                      <option className={isDarkTheme ? 'bg-slate-900 text-slate-100' : ''} value="" style={themedOptionNativeStyle}>Selecione a empresa</option>
                       {companyOptions.map((option) => (
-                        <option className={isDarkTheme ? 'bg-slate-900 text-slate-100' : ''} key={option.id} value={option.id}>{option.name}</option>
+                        <option className={isDarkTheme ? 'bg-slate-900 text-slate-100' : ''} key={option.id} value={option.id} style={themedOptionNativeStyle}>{option.name}</option>
                       ))}
                     </select>
                   </div>
