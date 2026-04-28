@@ -383,7 +383,6 @@ export default function InventoryERPWorkspace({
   const [currentUserId, setCurrentUserId] = useState<string>(viewerRole === 'ADMIN' ? 'u-admin' : 'u-op');
   const [allowGlobalNegative, setAllowGlobalNegative] = useState<boolean>(false);
   const [autoBlockNoStock, setAutoBlockNoStock] = useState<boolean>(true);
-  const [pdvRealtimeEnabled, setPdvRealtimeEnabled] = useState<boolean>(false);
   const [movements, setMovements] = useState<InventoryMovement[]>(() => dedupeMovements(readSavedMovements()));
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [timelineProductId, setTimelineProductId] = useState<string>('');
@@ -927,35 +926,6 @@ export default function InventoryERPWorkspace({
     showToast?.('CSV exportado.');
   };
 
-  useEffect(() => {
-    if (!pdvRealtimeEnabled) return;
-
-    const intervalId = window.setInterval(() => {
-      const locationId = 'loc-loja';
-      const activeProducts = products.filter((product) => product.status === 'ATIVO');
-      const randomProduct = activeProducts[Math.floor(Math.random() * activeProducts.length)];
-      if (!randomProduct) return;
-
-      const qty = 1;
-      const canSell = canRunOutputMovement(randomProduct.id, locationId, qty);
-      if (!canSell && autoBlockNoStock) return;
-
-      appendMovement({
-        id: movementId(),
-        produtoId: randomProduct.id,
-        tipo: 'SAIDA',
-        quantidade: qty,
-        localOrigemId: locationId,
-        localDestinoId: null,
-        dataHora: nowIso(),
-        usuarioId: 'u-pdv',
-        observacao: 'Integracao PDV: venda automatica simulada',
-      });
-    }, 9000);
-
-    return () => window.clearInterval(intervalId);
-  }, [pdvRealtimeEnabled, products, allowGlobalNegative, autoBlockNoStock, stockByProductLocation]);
-
   return (
     <div className="grid gap-5">
       <section className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
@@ -1221,14 +1191,6 @@ export default function InventoryERPWorkspace({
                   type="checkbox"
                   checked={autoBlockNoStock}
                   onChange={(event) => setAutoBlockNoStock(event.target.checked)}
-                />
-              </label>
-              <label className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                Integracao PDV em tempo real
-                <input
-                  type="checkbox"
-                  checked={pdvRealtimeEnabled}
-                  onChange={(event) => setPdvRealtimeEnabled(event.target.checked)}
                 />
               </label>
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-400">

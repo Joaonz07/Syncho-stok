@@ -737,28 +737,6 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
     return out;
   }, [criticalStock, outOfStock, topProducts, avgTicket, todaySales, todayTotal, payBreakdown, offlineQueue]);
 
-  // ── Simulate other registers activity ─────────────────────
-  useEffect(() => {
-    const id = setInterval(() => {
-      setRegisters((prev) =>
-        prev.map((r) => {
-          if (r.status !== 'online' || r.id === activeRegisterId) return r;
-          if (Math.random() > 0.65) {
-            const amount = Math.floor(Math.random() * 80) + 10;
-            return {
-              ...r,
-              vendasHoje: r.vendasHoje + 1,
-              totalHoje: r.totalHoje + amount,
-              ultimaVenda: new Date().toISOString(),
-            };
-          }
-          return r;
-        }),
-      );
-    }, 7000);
-    return () => clearInterval(id);
-  }, [activeRegisterId]);
-
   // ── Filtered history ───────────────────────────────────────
   const filteredHistory = useMemo(
     () =>
@@ -1130,7 +1108,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                     <button
                       type="button"
                       onClick={() => setPaymentModal(true)}
-                      disabled={cart.length === 0}
+                      disabled={cart.length === 0 || !activeRegister || activeRegister.status !== 'online' || !String(activeRegister.operador || '').trim()}
                       className="flex-1 rounded-xl bg-emerald-500 py-2.5 text-sm font-black text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Finalizar
