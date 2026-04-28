@@ -9,12 +9,20 @@ const httpServer = createServer(app);
 initSocketGateway(httpServer);
 
 const startServer = async () => {
-  await ensureAdminUser();
   const PORT = getPort();
 
   httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
+
+  // Nao bloqueia o boot do servidor por tarefas de seed.
+  void ensureAdminUser()
+    .then(() => {
+      console.log('Admin seed checked successfully.');
+    })
+    .catch((error) => {
+      console.error('Admin seed failed (continuing server):', error);
+    });
 };
 
 startServer().catch((error) => {
