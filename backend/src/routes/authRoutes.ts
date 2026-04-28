@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabaseAdmin, supabaseAuth } from '../supabaseClient';
+import { supabaseAdmin } from '../supabaseClient';
 import { logSecurityEvent } from '../services/securityLogger';
 import {
 	createCompanyForSignup,
@@ -156,7 +156,7 @@ router.post('/register', async (req, res) => {
 			});
 		}
 
-		const signIn = await supabaseAuth.auth.signInWithPassword({ email, password });
+		const signIn = await supabaseAdmin.auth.signInWithPassword({ email, password });
 
 		if (signIn.error || !signIn.data.session) {
 			logSecurityEvent({
@@ -254,7 +254,7 @@ router.post('/login', async (req, res) => {
 			return res.status(400).json({ message: 'Credenciais em formato invalido.' });
 		}
 
-		const { data, error } = await supabaseAuth.auth.signInWithPassword({
+		const { data, error } = await supabaseAdmin.auth.signInWithPassword({
 			email,
 			password
 		});
