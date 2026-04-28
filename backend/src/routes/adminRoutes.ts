@@ -438,6 +438,11 @@ router.post('/users', async (req, res) => {
     return res.status(400).json({ message: `${role} precisa de companyId ou companyName.` });
   }
 
+  if (role === 'ADMIN') {
+    companyId = null;
+    accessUntil = null;
+  }
+
   if ((role === 'CLIENT' || role === 'DEV') && !accessUntil && companyId) {
     accessUntil = await getCompanyAccessUntilFallback(companyId);
   }
@@ -448,12 +453,12 @@ router.post('/users', async (req, res) => {
     email_confirm: true,
     app_metadata: {
       role,
-      company_id: companyId
+      company_id: role === 'ADMIN' ? null : companyId
     },
     user_metadata: {
       name,
       role,
-      company_id: companyId,
+      company_id: role === 'ADMIN' ? null : companyId,
       access_until: accessUntil
     }
   });
@@ -549,6 +554,11 @@ router.patch('/users/:userId', async (req, res) => {
     return res.status(400).json({ message: `${nextRole} precisa de companyId ou companyName.` });
   }
 
+  if (nextRole === 'ADMIN') {
+    nextCompanyId = null;
+    accessUntil = null;
+  }
+
   if ((nextRole === 'CLIENT' || nextRole === 'DEV') && accessUntil === undefined && nextCompanyId) {
     accessUntil = await getCompanyAccessUntilFallback(nextCompanyId);
   }
@@ -558,12 +568,12 @@ router.patch('/users/:userId', async (req, res) => {
     ...(password ? { password } : {}),
     app_metadata: {
       role: nextRole,
-      company_id: nextCompanyId
+      company_id: nextRole === 'ADMIN' ? null : nextCompanyId
     },
     user_metadata: {
       name: name || String(currentUser.name || '').trim() || null,
       role: nextRole,
-      company_id: nextCompanyId,
+      company_id: nextRole === 'ADMIN' ? null : nextCompanyId,
       company_name: companyName || undefined,
       access_until: accessUntil === undefined ? currentUser.access_until || currentUser.accessUntil || null : accessUntil
     }

@@ -441,6 +441,9 @@ export const ensureUserHasCompany = async (params: {
       : normalizeUserRole(roleFromSources || 'CLIENT');
   let companyId =
     metadataCompanyId || publicUserProfile.companyId || params.fallbackCompanyId || null;
+  if (role === 'ADMIN') {
+    companyId = null;
+  }
   let companyName =
     metadataCompanyName ||
     params.fallbackCompanyName ||

@@ -3260,9 +3260,9 @@ const Dashboard = () => {
           email: userFormEmail.trim(),
           password: userFormPassword,
           role: userFormRole,
-          companyId: userFormRole === 'ADMIN' ? null : userFormCompanyId.trim() || null,
-          companyName: (userFormRole === 'CLIENT' || userFormRole === 'DEV') ? userFormCompanyName.trim() || null : null,
-          accessUntil: (userFormRole === 'CLIENT' || userFormRole === 'DEV') && userFormAccessUntil ? new Date(userFormAccessUntil).toISOString() : null
+          companyId: userFormRole === 'CLIENT' ? userFormCompanyId.trim() || null : null,
+          companyName: userFormRole === 'CLIENT' ? userFormCompanyName.trim() || null : null,
+          accessUntil: userFormRole === 'CLIENT' && userFormAccessUntil ? new Date(userFormAccessUntil).toISOString() : null
         })
       });
       const result = await response.json();
@@ -3334,10 +3334,10 @@ const Dashboard = () => {
           name: editingUserName.trim(),
           email: editingUserEmail.trim(),
           role: editingUserRole,
-          companyId: editingUserRole === 'ADMIN' ? null : editingUserCompanyId.trim() || null,
-          companyName: (editingUserRole === 'CLIENT' || editingUserRole === 'DEV') ? editingUserCompanyName.trim() || null : null,
+          companyId: editingUserRole === 'CLIENT' ? editingUserCompanyId.trim() || null : null,
+          companyName: editingUserRole === 'CLIENT' ? editingUserCompanyName.trim() || null : null,
           accessUntil:
-            (editingUserRole === 'CLIENT' || editingUserRole === 'DEV')
+            editingUserRole === 'CLIENT'
               ? editingUserAccessUntil
                 ? new Date(editingUserAccessUntil).toISOString()
                 : null
@@ -5139,14 +5139,16 @@ const Dashboard = () => {
                   <h2 className={['mb-4 text-lg font-bold', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Gestao de usuarios por empresa</h2>
                   <div className="grid gap-4">
                     {Object.entries(
-                      managedUsers.reduce<Record<string, ManagedUser[]>>((acc, user) => {
+                        managedUsers
+                          .filter((user) => String(user.role || '').toUpperCase() === 'CLIENT')
+                          .reduce<Record<string, ManagedUser[]>>((acc, user) => {
                         const key = String(user.company_id || user.companyId || 'Sem empresa');
                         if (!acc[key]) {
                           acc[key] = [];
                         }
                         acc[key].push(user);
                         return acc;
-                      }, {})
+                          }, {})
                     ).map(([companyRef, users]) => (
                       <div key={companyRef} className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
                         <p className={['mb-3 text-sm font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>
@@ -5179,6 +5181,30 @@ const Dashboard = () => {
                         </div>
                       </div>
                     ))}
+
+                  <div className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 p-4' : 'rounded-xl border border-slate-200 bg-white p-4'}>
+                    <p className={['mb-3 text-sm font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>
+                      Administradores da plataforma
+                    </p>
+                    <div className="grid gap-2">
+                      {managedUsers
+                        .filter((user) => String(user.role || '').toUpperCase() !== 'CLIENT')
+                        .map((user) => (
+                          <div key={user.id} className={['flex items-center justify-between rounded-lg px-3 py-2', isDarkTheme ? 'bg-black/20' : 'bg-slate-50'].join(' ')}>
+                            <div>
+                              <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{user.name}</p>
+                              <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{user.email} · {user.role}</p>
+                            </div>
+                            <span className={['text-xs font-semibold', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>Sem empresa vinculada</span>
+                          </div>
+                        ))}
+                      {!managedUsers.some((user) => String(user.role || '').toUpperCase() !== 'CLIENT') ? (
+                        <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
+                          Nenhum administrador cadastrado.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
                   </div>
                 </div>
               ) : null}
@@ -5362,14 +5388,14 @@ const Dashboard = () => {
                     <option className={themedOptionClass} value="DEV">DEV</option>
                     <option className={themedOptionClass} value="ADMIN">ADMIN</option>
                   </select>
-                  <select className={themedSelectClass} value={userFormCompanyId} onChange={(event) => setUserFormCompanyId(event.target.value)} disabled={userFormRole === 'ADMIN'}>
+                  <select className={themedSelectClass} value={userFormCompanyId} onChange={(event) => setUserFormCompanyId(event.target.value)} disabled={userFormRole !== 'CLIENT'}>
                     <option className={themedOptionClass} value="">Selecione uma empresa</option>
                     {companyOptions.map((option) => (
                       <option className={themedOptionClass} key={option.id} value={option.id}>{option.name}</option>
                     ))}
                   </select>
-                  <input className={themedInputClass} placeholder="Ou criar nova empresa para CLIENT/DEV" value={userFormCompanyName} onChange={(event) => setUserFormCompanyName(event.target.value)} disabled={userFormRole === 'ADMIN'} />
-                  <input className={themedInputClass} type="date" value={userFormAccessUntil} onChange={(event) => setUserFormAccessUntil(event.target.value)} disabled={userFormRole === 'ADMIN'} />
+                  <input className={themedInputClass} placeholder="Ou criar nova empresa para CLIENT" value={userFormCompanyName} onChange={(event) => setUserFormCompanyName(event.target.value)} disabled={userFormRole !== 'CLIENT'} />
+                  <input className={themedInputClass} type="date" value={userFormAccessUntil} onChange={(event) => setUserFormAccessUntil(event.target.value)} disabled={userFormRole !== 'CLIENT'} />
                 </div>
                 <button type="button" onClick={handleCreateUser} className="mt-4 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-70" disabled={adminLoading}>
                   Criar usuario
@@ -5387,14 +5413,14 @@ const Dashboard = () => {
                       <option className={themedOptionClass} value="DEV">DEV</option>
                       <option className={themedOptionClass} value="ADMIN">ADMIN</option>
                     </select>
-                    <select className={themedSelectClass} value={editingUserCompanyId} onChange={(event) => setEditingUserCompanyId(event.target.value)} disabled={editingUserRole === 'ADMIN'}>
+                    <select className={themedSelectClass} value={editingUserCompanyId} onChange={(event) => setEditingUserCompanyId(event.target.value)} disabled={editingUserRole !== 'CLIENT'}>
                       <option className={themedOptionClass} value="">Selecione uma empresa</option>
                       {companyOptions.map((option) => (
                         <option className={themedOptionClass} key={option.id} value={option.id}>{option.name}</option>
                       ))}
                     </select>
-                    <input className={themedInputClass} placeholder="Ou criar nova empresa" value={editingUserCompanyName} onChange={(event) => setEditingUserCompanyName(event.target.value)} disabled={editingUserRole === 'ADMIN'} />
-                    <input className={themedInputClass} type="date" value={editingUserAccessUntil} onChange={(event) => setEditingUserAccessUntil(event.target.value)} disabled={editingUserRole === 'ADMIN'} />
+                    <input className={themedInputClass} placeholder="Ou criar nova empresa" value={editingUserCompanyName} onChange={(event) => setEditingUserCompanyName(event.target.value)} disabled={editingUserRole !== 'CLIENT'} />
+                    <input className={themedInputClass} type="date" value={editingUserAccessUntil} onChange={(event) => setEditingUserAccessUntil(event.target.value)} disabled={editingUserRole !== 'CLIENT'} />
                     <input className={themedInputClass} placeholder="Nova senha (opcional)" type="password" value={editingUserPassword} onChange={(event) => setEditingUserPassword(event.target.value)} />
                   </div>
                   <div className="mt-4 flex gap-2">
