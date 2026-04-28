@@ -6,6 +6,16 @@ import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch as fetch, getApiBaseUrl } from '../lib/api';
 import { getAccessToken, getCompanyId as getSessionCompanyId } from '../lib/session';
+import {
+  SHARED_COMPANY_FEATURES_UPDATED_EVENT,
+  SHARED_PRODUCTS_UPDATED_EVENT,
+  dispatchSharedEvent,
+  getCompanyMultiStoreEnabled,
+  readSharedProducts,
+  setCompanyMultiStoreEnabled,
+  writeSharedProducts,
+  type SharedProduct,
+} from '../lib/synchoSharedData';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -102,9 +112,15 @@ type Product = {
   id: string;
   name: string;
   code?: string;
+  sku?: string;
+  barcode?: string;
+  category?: string;
   price: number;
+  cost?: number;
   description?: string;
   quantity?: number;
+  enabledInInventory?: boolean;
+  enabledInPDV?: boolean;
   company_id?: string;
   companyId?: string;
 };
@@ -789,6 +805,7 @@ const Dashboard = () => {
   const [editingCompanyLocation, setEditingCompanyLocation] = useState('');
   const [editingCompanyPlan, setEditingCompanyPlan] = useState<CompanyPlan>('BASIC');
   const [editingCompanyStatus, setEditingCompanyStatus] = useState<CompanyStatus>('ACTIVE');
+  const [companyMultiStoreSettings, setCompanyMultiStoreSettings] = useState<Record<string, boolean>>({});
   const [userFormName, setUserFormName] = useState('');
   const [userFormEmail, setUserFormEmail] = useState('');
   const [userFormPassword, setUserFormPassword] = useState('');
@@ -810,12 +827,29 @@ const Dashboard = () => {
   const [showProductCreateModal, setShowProductCreateModal] = useState(false);
   const [productName, setProductName] = useState('');
   const [productPrice, setProductPrice] = useState('');
+  const [productCost, setProductCost] = useState('');
+  const [productCode, setProductCode] = useState('');
+  const [productSku, setProductSku] = useState('');
+  const [productBarcode, setProductBarcode] = useState('');
+  const [productCategory, setProductCategory] = useState('Sem categoria');
+  const [productEnabledInInventory, setProductEnabledInInventory] = useState(true);
+  const [productEnabledInPDV, setProductEnabledInPDV] = useState(true);
   const [productQuantity, setProductQuantity] = useState('0');
   const [productDescription, setProductDescription] = useState('');
   const [productCompanyId, setProductCompanyId] = useState('');
+  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('TODAS');
+  const [productPage, setProductPage] = useState(1);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingProductName, setEditingProductName] = useState('');
   const [editingProductPrice, setEditingProductPrice] = useState('');
+  const [editingProductCost, setEditingProductCost] = useState('');
+  const [editingProductCode, setEditingProductCode] = useState('');
+  const [editingProductSku, setEditingProductSku] = useState('');
+  const [editingProductBarcode, setEditingProductBarcode] = useState('');
+  const [editingProductCategory, setEditingProductCategory] = useState('Sem categoria');
+  const [editingProductEnabledInInventory, setEditingProductEnabledInInventory] = useState(true);
+  const [editingProductEnabledInPDV, setEditingProductEnabledInPDV] = useState(true);
   const [editingProductDescription, setEditingProductDescription] = useState('');
   const [integrationCompanyId, setIntegrationCompanyId] = useState('');
   const [integrationLoading, setIntegrationLoading] = useState(false);
@@ -956,6 +990,105 @@ const Dashboard = () => {
   const themedTitleClass = isDarkTheme ? 'text-2xl font-black text-white' : 'text-2xl font-black text-slate-800';
   const themedSubtextClass = isDarkTheme ? 'text-sm text-slate-300' : 'text-sm text-slate-500';
   const canOpenSupportChat = Boolean(selectedSupportRequestId);
+  const inventoryTargetCompanyId = useMemo(() => {
+    if (role === 'ADMIN') {
+      return String(productCompanyId || '').trim();
+    }
+
+    return String(companyId || companyIdFromJwt || '').trim();
+  }, [productCompanyId, role, companyId, companyIdFromJwt]);
+
+  const inventoryMultiStoreEnabled = useMemo(() => {
+    if (!inventoryTargetCompanyId) {
+      return false;
+    }
+
+    return Boolean(companyMultiStoreSettings[inventoryTargetCompanyId]);
+  }, [companyMultiStoreSettings, inventoryTargetCompanyId]);
+
+  const toSharedProduct = useCallback((product: Product): SharedProduct => ({
+    id: String(product.id || '').trim(),
+    name: String(product.name || '').trim(),
+    code: String(product.code || '').trim(),
+    sku: String(product.sku || product.code || '').trim(),
+    barcode: String(product.barcode || '').trim(),
+    category: String(product.category || 'Sem categoria').trim() || 'Sem categoria',
+    price: Number(product.price || 0),
+    cost: Number(product.cost ?? product.price ?? 0),
+    quantity: Math.max(0, Math.floor(Number(product.quantity || 0))),
+    description: String(product.description || '').trim(),
+    companyId: String(product.company_id || product.companyId || '').trim(),
+    enabledInInventory: product.enabledInInventory !== false,
+    enabledInPDV: product.enabledInPDV !== false,
+  }), []);
+
+  const mergeProductsWithSharedMeta = useCallback((items: Product[]) => {
+    const sharedById = new Map(readSharedProducts().map((item) => [String(item.id || '').trim(), item]));
+
+    return items.map((item) => {
+      const shared = sharedById.get(String(item.id || '').trim());
+      return {
+        ...item,
+        sku: String(item.sku || shared?.sku || item.code || '').trim(),
+        barcode: String(item.barcode || shared?.barcode || '').trim(),
+        category: String(item.category || shared?.category || 'Sem categoria').trim() || 'Sem categoria',
+        cost: Number(item.cost ?? shared?.cost ?? item.price ?? 0),
+        enabledInInventory: item.enabledInInventory ?? shared?.enabledInInventory ?? true,
+        enabledInPDV: item.enabledInPDV ?? shared?.enabledInPDV ?? true,
+      } as Product;
+    });
+  }, []);
+
+  const syncSharedProductCatalog = useCallback((items: Product[]) => {
+    const mapped = items.map(toSharedProduct);
+    writeSharedProducts(mapped);
+    dispatchSharedEvent(SHARED_PRODUCTS_UPDATED_EVENT, { source: 'dashboard' });
+  }, [toSharedProduct]);
+
+  const productCategories = useMemo(() => {
+    return Array.from(new Set(products.map((item) => String(item.category || '').trim()).filter(Boolean))).sort();
+  }, [products]);
+
+  const filteredProductsList = useMemo(() => {
+    const query = productSearchTerm.trim().toLowerCase();
+
+    return products.filter((product) => {
+      if (productCategoryFilter !== 'TODAS' && String(product.category || 'Sem categoria') !== productCategoryFilter) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const haystack = [
+        String(product.name || ''),
+        String(product.code || ''),
+        String(product.sku || ''),
+        String(product.barcode || ''),
+        String(product.category || ''),
+      ].join(' ').toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [products, productSearchTerm, productCategoryFilter]);
+
+  const productsPerPage = 8;
+  const productTotalPages = Math.max(1, Math.ceil(filteredProductsList.length / productsPerPage));
+  const paginatedProducts = useMemo(() => {
+    const offset = (productPage - 1) * productsPerPage;
+    return filteredProductsList.slice(offset, offset + productsPerPage);
+  }, [filteredProductsList, productPage]);
+
+  useEffect(() => {
+    setProductPage(1);
+  }, [productSearchTerm, productCategoryFilter]);
+
+  useEffect(() => {
+    if (productPage > productTotalPages) {
+      setProductPage(productTotalPages);
+    }
+  }, [productPage, productTotalPages]);
 
   const filteredLeads = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -2169,6 +2302,51 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
+    const loadSettings = () => {
+      const next: Record<string, boolean> = {};
+      for (const company of companies) {
+        const companyIdValue = String(company.id || '').trim();
+        if (!companyIdValue) continue;
+        next[companyIdValue] = getCompanyMultiStoreEnabled(companyIdValue);
+      }
+      setCompanyMultiStoreSettings(next);
+    };
+
+    const onCompanyFeaturesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyId?: string; multiStoreEnabled?: boolean }>).detail;
+      const companyIdValue = String(detail?.companyId || '').trim();
+      if (!companyIdValue) {
+        loadSettings();
+        return;
+      }
+
+      setCompanyMultiStoreSettings((prev) => ({
+        ...prev,
+        [companyIdValue]: Boolean(detail?.multiStoreEnabled),
+      }));
+    };
+
+    loadSettings();
+    window.addEventListener(SHARED_COMPANY_FEATURES_UPDATED_EVENT, onCompanyFeaturesUpdated);
+
+    return () => {
+      window.removeEventListener(SHARED_COMPANY_FEATURES_UPDATED_EVENT, onCompanyFeaturesUpdated);
+    };
+  }, [companies]);
+
+  const toggleCompanyMultiStore = (targetCompanyId: string) => {
+    const normalizedCompanyId = String(targetCompanyId || '').trim();
+    if (!normalizedCompanyId) {
+      return;
+    }
+
+    const nextValue = !Boolean(companyMultiStoreSettings[normalizedCompanyId]);
+    setCompanyMultiStoreEnabled(normalizedCompanyId, nextValue);
+    setCompanyMultiStoreSettings((prev) => ({ ...prev, [normalizedCompanyId]: nextValue }));
+    showToast(nextValue ? 'Multi-loja habilitado para empresa' : 'Multi-loja desabilitado para empresa');
+  };
+
+  useEffect(() => {
     if (role === 'ADMIN') {
       return;
     }
@@ -2230,7 +2408,9 @@ const Dashboard = () => {
         return;
       }
 
-      setProducts((result.products || []) as Product[]);
+      const mergedProducts = mergeProductsWithSharedMeta((result.products || []) as Product[]);
+      setProducts(mergedProducts);
+      syncSharedProductCatalog(mergedProducts);
       setStatus('Produtos carregados com sucesso.');
     } catch (_error) {
       setStatus('Erro de rede ao carregar produtos.');
@@ -3376,6 +3556,12 @@ const Dashboard = () => {
       return;
     }
 
+    const normalizedCategory = String(productCategory || 'Sem categoria').trim() || 'Sem categoria';
+    const normalizedSku = String(productSku || '').trim();
+    const normalizedBarcode = String(productBarcode || '').trim();
+    const normalizedCode = String(productCode || normalizedSku || normalizedBarcode).trim();
+    const normalizedCost = Number(productCost || productPrice || 0);
+
     const initialQuantity = Math.max(0, Math.floor(Number(productQuantity || 0)));
 
     if (!Number.isFinite(initialQuantity)) {
@@ -3394,6 +3580,7 @@ const Dashboard = () => {
         },
         body: JSON.stringify({
           name: productName.trim(),
+          code: normalizedCode,
           price: Number(productPrice || 0),
           quantity: initialQuantity,
           description: productDescription.trim(),
@@ -3412,8 +3599,32 @@ const Dashboard = () => {
         return;
       }
 
+      const created = result?.product as Product | undefined;
+      if (created?.id) {
+        const sharedCurrent = readSharedProducts().filter((item) => String(item.id || '').trim() !== String(created.id || '').trim());
+        const enrichedCreated: Product = {
+          ...(created as Product),
+          sku: normalizedSku,
+          barcode: normalizedBarcode,
+          category: normalizedCategory,
+          cost: Number.isFinite(normalizedCost) ? normalizedCost : Number(created.price || 0),
+          enabledInInventory: productEnabledInInventory,
+          enabledInPDV: productEnabledInPDV,
+          company_id: String(created.company_id || created.companyId || targetCompanyId),
+        };
+        writeSharedProducts([...sharedCurrent, toSharedProduct(enrichedCreated)]);
+        dispatchSharedEvent(SHARED_PRODUCTS_UPDATED_EVENT, { source: 'dashboard' });
+      }
+
       setProductName('');
       setProductPrice('');
+      setProductCost('');
+      setProductCode('');
+      setProductSku('');
+      setProductBarcode('');
+      setProductCategory('Sem categoria');
+      setProductEnabledInInventory(true);
+      setProductEnabledInPDV(true);
       setProductQuantity('0');
       setProductDescription('');
       setShowProductCreateModal(false);
@@ -3431,6 +3642,13 @@ const Dashboard = () => {
     setEditingProductId(product.id);
     setEditingProductName(String(product.name || ''));
     setEditingProductPrice(String(Number(product.price || 0)));
+    setEditingProductCost(String(Number(product.cost ?? product.price ?? 0)));
+    setEditingProductCode(String(product.code || ''));
+    setEditingProductSku(String(product.sku || ''));
+    setEditingProductBarcode(String(product.barcode || ''));
+    setEditingProductCategory(String(product.category || 'Sem categoria'));
+    setEditingProductEnabledInInventory(product.enabledInInventory !== false);
+    setEditingProductEnabledInPDV(product.enabledInPDV !== false);
     setEditingProductDescription(String(product.description || ''));
   };
 
@@ -3438,6 +3656,13 @@ const Dashboard = () => {
     setEditingProductId(null);
     setEditingProductName('');
     setEditingProductPrice('');
+    setEditingProductCost('');
+    setEditingProductCode('');
+    setEditingProductSku('');
+    setEditingProductBarcode('');
+    setEditingProductCategory('Sem categoria');
+    setEditingProductEnabledInInventory(true);
+    setEditingProductEnabledInPDV(true);
     setEditingProductDescription('');
   };
 
@@ -3455,6 +3680,12 @@ const Dashboard = () => {
 
     setProductsLoading(true);
 
+    const normalizedCategory = String(editingProductCategory || 'Sem categoria').trim() || 'Sem categoria';
+    const normalizedSku = String(editingProductSku || '').trim();
+    const normalizedBarcode = String(editingProductBarcode || '').trim();
+    const normalizedCode = String(editingProductCode || normalizedSku || normalizedBarcode).trim();
+    const normalizedCost = Number(editingProductCost || editingProductPrice || 0);
+
     try {
       const response = await fetch(`/api/dashboard/products/${editingProductId}`, {
         method: 'PATCH',
@@ -3464,6 +3695,7 @@ const Dashboard = () => {
         },
         body: JSON.stringify({
           name: editingProductName.trim(),
+          code: normalizedCode,
           price: Number(editingProductPrice || 0),
           description: editingProductDescription.trim(),
           companyId: targetCompanyId
@@ -3475,6 +3707,31 @@ const Dashboard = () => {
         setStatus(result.message || 'Falha ao atualizar produto.');
         return;
       }
+
+      const sharedCurrent = readSharedProducts();
+      const existingShared = sharedCurrent.find((item) => String(item.id || '').trim() === String(editingProductId || '').trim());
+      const sharedCompanyId = String(existingShared?.companyId || targetCompanyId || '').trim();
+      const mergedShared: SharedProduct = {
+        ...(existingShared || {}),
+        id: String(editingProductId || '').trim(),
+        name: editingProductName.trim(),
+        code: normalizedCode,
+        sku: normalizedSku,
+        barcode: normalizedBarcode,
+        category: normalizedCategory,
+        price: Number(editingProductPrice || 0),
+        cost: Number.isFinite(normalizedCost) ? normalizedCost : Number(editingProductPrice || 0),
+        description: editingProductDescription.trim(),
+        quantity: Math.max(0, Math.floor(Number(existingShared?.quantity || 0))),
+        companyId: sharedCompanyId,
+        enabledInInventory: editingProductEnabledInInventory,
+        enabledInPDV: editingProductEnabledInPDV,
+      };
+      writeSharedProducts([
+        ...sharedCurrent.filter((item) => String(item.id || '').trim() !== String(editingProductId || '').trim()),
+        mergedShared,
+      ]);
+      dispatchSharedEvent(SHARED_PRODUCTS_UPDATED_EVENT, { source: 'dashboard' });
 
       cancelProductEditor();
       setStatus('Produto atualizado com sucesso.');
@@ -3519,6 +3776,10 @@ const Dashboard = () => {
       if (editingProductId === targetProductId) {
         cancelProductEditor();
       }
+
+      const updatedShared = readSharedProducts().filter((item) => String(item.id || '').trim() !== String(targetProductId || '').trim());
+      writeSharedProducts(updatedShared);
+      dispatchSharedEvent(SHARED_PRODUCTS_UPDATED_EVENT, { source: 'dashboard' });
 
       setStatus('Produto excluido com sucesso.');
       showToast('Produto excluido');
@@ -4999,8 +5260,23 @@ const Dashboard = () => {
                           <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>ID: {company.id}</p>
                           <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>Localizacao: {company.location || 'Nao informada'}</p>
                           <p className={isDarkTheme ? 'mt-1 text-sm text-slate-300' : 'mt-1 text-sm text-slate-600'}>Plano: {company.plan || 'BASIC'} | Status: {currentStatus}</p>
+                          <p className={isDarkTheme ? 'mt-1 text-sm text-cyan-300' : 'mt-1 text-sm text-cyan-700'}>
+                            Multi-loja: {companyMultiStoreSettings[String(company.id || '').trim()] ? 'Habilitado' : 'Desabilitado'}
+                          </p>
                         </div>
                         <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleCompanyMultiStore(company.id)}
+                            className={[
+                              'rounded-xl px-3 py-2 text-sm font-semibold transition-all duration-300 hover:-translate-y-0.5',
+                              companyMultiStoreSettings[String(company.id || '').trim()]
+                                ? 'bg-cyan-600 text-white hover:bg-cyan-500'
+                                : 'bg-slate-700 text-white hover:bg-slate-600'
+                            ].join(' ')}
+                          >
+                            {companyMultiStoreSettings[String(company.id || '').trim()] ? 'Desativar multi-loja' : 'Ativar multi-loja'}
+                          </button>
                           <button type="button" onClick={() => openCompanyEditor(company)} className={isDarkTheme ? 'rounded-xl border border-white/20 px-3 py-2 text-sm font-semibold text-slate-100 transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/10' : 'rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-100'}>Editar</button>
                           <button type="button" onClick={() => void deleteCompany(company.id)} className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-rose-500">Excluir</button>
                         </div>
@@ -5097,7 +5373,7 @@ const Dashboard = () => {
             <div className="grid gap-6">
               <div className={themedPanelClass}>
                 <h1 className={themedTitleClass}>Produtos</h1>
-                <p className={['mt-1', themedSubtextClass].join(' ')}>Cadastro de produtos separado do controle de estoque.</p>
+                <p className={['mt-1', themedSubtextClass].join(' ')}>Base unica para cadastro, estoque e PDV.</p>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   {role === 'ADMIN' ? (
@@ -5108,6 +5384,32 @@ const Dashboard = () => {
                       ))}
                     </select>
                   ) : null}
+
+                  <input
+                    className={themedInputClass}
+                    placeholder="Buscar por nome, SKU, código ou barras"
+                    value={productSearchTerm}
+                    onChange={(event) => setProductSearchTerm(event.target.value)}
+                  />
+
+                  <select
+                    className={themedSelectClass}
+                    value={productCategoryFilter}
+                    onChange={(event) => setProductCategoryFilter(event.target.value)}
+                    style={themedSelectNativeStyle}
+                  >
+                    <option className={themedOptionClass} value="TODAS" style={themedOptionNativeStyle}>Todas categorias</option>
+                    {productCategories.map((category) => (
+                      <option className={themedOptionClass} key={category} value={category} style={themedOptionNativeStyle}>{category}</option>
+                    ))}
+                  </select>
+
+                  <div className={[
+                    'rounded-xl border px-3 py-2 text-sm',
+                    isDarkTheme ? 'border-white/10 bg-white/5 text-slate-200' : 'border-slate-200 bg-slate-50 text-slate-700'
+                  ].join(' ')}>
+                    {filteredProductsList.length} produto(s)
+                  </div>
                 </div>
 
                 <div className="mt-4 flex gap-2">
@@ -5120,9 +5422,13 @@ const Dashboard = () => {
                 <div className="fixed inset-0 z-[80] grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
                   <div className={[themedPanelClass, 'w-full max-w-xl'].join(' ')}>
                     <h2 className={themedTitleClass}>Criar produto</h2>
-                    <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>Preencha apenas os dados de cadastro do produto.</p>
-                    <div className="mt-4 grid gap-3">
+                    <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>Cadastro completo com integração em estoque e PDV.</p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
                       <input className={themedInputClass} placeholder="Nome" value={productName} onChange={(event) => setProductName(event.target.value)} />
+                      <input className={themedInputClass} placeholder="Categoria" value={productCategory} onChange={(event) => setProductCategory(event.target.value)} />
+                      <input className={themedInputClass} placeholder="SKU" value={productSku} onChange={(event) => setProductSku(event.target.value)} />
+                      <input className={themedInputClass} placeholder="Código de barras" value={productBarcode} onChange={(event) => setProductBarcode(event.target.value)} />
+                      <input className={themedInputClass} placeholder="Código interno" value={productCode} onChange={(event) => setProductCode(event.target.value)} />
                       <div className={[
                         'flex items-center rounded-xl border px-3 py-2 text-sm',
                         isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800'
@@ -5138,6 +5444,21 @@ const Dashboard = () => {
                           onChange={(event) => setProductPrice(event.target.value)}
                         />
                       </div>
+                      <div className={[
+                        'flex items-center rounded-xl border px-3 py-2 text-sm',
+                        isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800'
+                      ].join(' ')}>
+                        <span className={isDarkTheme ? 'mr-2 text-slate-400' : 'mr-2 text-slate-500'}>Custo R$</span>
+                        <input
+                          className="w-full bg-transparent outline-none"
+                          placeholder="0,00"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={productCost}
+                          onChange={(event) => setProductCost(event.target.value)}
+                        />
+                      </div>
                       <input
                         className={themedInputClass}
                         placeholder="Quantidade inicial em estoque"
@@ -5147,7 +5468,15 @@ const Dashboard = () => {
                         value={productQuantity}
                         onChange={(event) => setProductQuantity(event.target.value)}
                       />
-                      <textarea className={themedInputClass} placeholder="Descricao" value={productDescription} onChange={(event) => setProductDescription(event.target.value)} rows={4} />
+                      <label className={['flex items-center gap-2 rounded-xl border px-3 py-2 text-sm', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-700'].join(' ')}>
+                        <input type="checkbox" checked={productEnabledInInventory} onChange={(event) => setProductEnabledInInventory(event.target.checked)} />
+                        Disponível no Estoque
+                      </label>
+                      <label className={['flex items-center gap-2 rounded-xl border px-3 py-2 text-sm', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-700'].join(' ')}>
+                        <input type="checkbox" checked={productEnabledInPDV} onChange={(event) => setProductEnabledInPDV(event.target.checked)} />
+                        Disponível no PDV
+                      </label>
+                      <textarea className={themedInputClass + ' md:col-span-2'} placeholder="Descricao" value={productDescription} onChange={(event) => setProductDescription(event.target.value)} rows={4} />
                     </div>
                     <div className="mt-4 flex gap-2">
                       <button type="button" onClick={handleCreateProduct} disabled={productsLoading} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-all duration-300 hover:bg-blue-500 disabled:opacity-70">Criar produto</button>
@@ -5163,7 +5492,20 @@ const Dashboard = () => {
                   <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     <input className={themedInputClass} value={editingProductName} onChange={(event) => setEditingProductName(event.target.value)} />
                     <input className={themedInputClass} type="number" step="0.01" value={editingProductPrice} onChange={(event) => setEditingProductPrice(event.target.value)} />
-                    <textarea className={themedInputClass} value={editingProductDescription} onChange={(event) => setEditingProductDescription(event.target.value)} rows={3} />
+                    <input className={themedInputClass} type="number" step="0.01" value={editingProductCost} onChange={(event) => setEditingProductCost(event.target.value)} placeholder="Custo" />
+                    <input className={themedInputClass} value={editingProductCategory} onChange={(event) => setEditingProductCategory(event.target.value)} placeholder="Categoria" />
+                    <input className={themedInputClass} value={editingProductSku} onChange={(event) => setEditingProductSku(event.target.value)} placeholder="SKU" />
+                    <input className={themedInputClass} value={editingProductBarcode} onChange={(event) => setEditingProductBarcode(event.target.value)} placeholder="Código de barras" />
+                    <input className={themedInputClass} value={editingProductCode} onChange={(event) => setEditingProductCode(event.target.value)} placeholder="Código interno" />
+                    <label className={['flex items-center gap-2 rounded-xl border px-3 py-2 text-sm', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-700'].join(' ')}>
+                      <input type="checkbox" checked={editingProductEnabledInInventory} onChange={(event) => setEditingProductEnabledInInventory(event.target.checked)} />
+                      Disponível no Estoque
+                    </label>
+                    <label className={['flex items-center gap-2 rounded-xl border px-3 py-2 text-sm', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-700'].join(' ')}>
+                      <input type="checkbox" checked={editingProductEnabledInPDV} onChange={(event) => setEditingProductEnabledInPDV(event.target.checked)} />
+                      Disponível no PDV
+                    </label>
+                    <textarea className={themedInputClass + ' md:col-span-2 xl:col-span-3'} value={editingProductDescription} onChange={(event) => setEditingProductDescription(event.target.value)} rows={3} />
                   </div>
                   <div className="mt-4 flex gap-2">
                     <button type="button" onClick={saveProductChanges} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-blue-500">Salvar produto</button>
@@ -5173,12 +5515,23 @@ const Dashboard = () => {
               ) : null}
 
               <div className="grid gap-3">
-                {products.map((product) => (
+                {paginatedProducts.map((product) => (
                   <article key={product.id} className={themedPanelClass}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <h3 className={isDarkTheme ? 'text-lg font-bold text-white' : 'text-lg font-bold text-slate-800'}>{product.name}</h3>
                         <p className={isDarkTheme ? 'mt-1 text-sm text-slate-300' : 'mt-1 text-sm text-slate-600'}>Preco: {formatCurrency(Number(product.price || 0))}</p>
+                        <p className={isDarkTheme ? 'mt-1 text-sm text-slate-300' : 'mt-1 text-sm text-slate-600'}>Custo: {formatCurrency(Number(product.cost ?? product.price ?? 0))}</p>
+                        <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>Categoria: {String(product.category || 'Sem categoria')}</p>
+                        <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>SKU: {String(product.sku || '-')} | Barras: {String(product.barcode || '-')} | Código: {String(product.code || '-')}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className={['rounded-full px-2 py-0.5 text-xs font-semibold', product.enabledInInventory === false ? 'bg-slate-500/20 text-slate-400' : 'bg-emerald-500/20 text-emerald-500'].join(' ')}>
+                            Estoque: {product.enabledInInventory === false ? 'Desabilitado' : 'Ativo'}
+                          </span>
+                          <span className={['rounded-full px-2 py-0.5 text-xs font-semibold', product.enabledInPDV === false ? 'bg-slate-500/20 text-slate-400' : 'bg-cyan-500/20 text-cyan-500'].join(' ')}>
+                            PDV: {product.enabledInPDV === false ? 'Desabilitado' : 'Ativo'}
+                          </span>
+                        </div>
                         <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>{String(product.description || 'Sem descricao cadastrada.')}</p>
                       </div>
                       <div className="flex gap-2">
@@ -5188,12 +5541,45 @@ const Dashboard = () => {
                     </div>
                   </article>
                 ))}
+
+                {!paginatedProducts.length ? (
+                  <article className={themedPanelClass}>
+                    <p className={themedSubtextClass}>Nenhum produto encontrado para os filtros atuais.</p>
+                  </article>
+                ) : null}
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <p className={themedSubtextClass}>Página {productPage} de {productTotalPages}</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setProductPage((prev) => Math.max(1, prev - 1))}
+                    disabled={productPage <= 1}
+                    className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 disabled:opacity-50"
+                  >
+                    Anterior
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProductPage((prev) => Math.min(productTotalPages, prev + 1))}
+                    disabled={productPage >= productTotalPages}
+                    className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 disabled:opacity-50"
+                  >
+                    Próxima
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
 
           {activeView === 'inventory' ? (
-            <InventoryERPWorkspace showToast={showToast} />
+            <InventoryERPWorkspace
+              showToast={showToast}
+              viewerRole={role === 'ADMIN' || role === 'DEV' || role === 'CLIENT' ? role : 'CLIENT'}
+              companyId={inventoryTargetCompanyId}
+              multiStoreEnabled={inventoryMultiStoreEnabled}
+            />
           ) : null}
 
           {activeView === 'integrations' && (role === 'DEV' || role === 'ADMIN') ? (

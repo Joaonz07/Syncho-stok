@@ -7,6 +7,14 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import type { KeyboardEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  SHARED_PRODUCTS_UPDATED_EVENT,
+  SHARED_STOCK_UPDATED_EVENT,
+  dispatchSharedEvent,
+  readSharedProducts,
+  readSharedStockMovements,
+  writeSharedStockMovements,
+} from '../../lib/synchoSharedData';
+import {
   ShoppingCart,
   Search,
   Package,
@@ -35,7 +43,7 @@ import {
 
 // ─── TYPES ──────────────────────────────────────────────────
 
-type Category = 'todos' | 'alimentos' | 'bebidas' | 'limpeza' | 'higiene' | 'outros';
+type Category = string;
 
 type Product = {
   id: string;
@@ -80,6 +88,9 @@ type Register = {
   operador: string;
   status: RegisterStatus;
   ultimaVenda?: string;
+  abertura?: string;
+  fechamento?: string;
+  fundoAbertura?: number;
   vendasHoje: number;
   totalHoje: number;
 };
@@ -121,7 +132,7 @@ const MOCK_PRODUCTS: Product[] = [
 ];
 
 const INITIAL_REGISTERS: Register[] = [
-  { id: 'cx1', nome: 'Caixa 01', operador: 'Você', status: 'online', vendasHoje: 12, totalHoje: 487.3 },
+  { id: 'cx1', nome: 'Caixa 01', operador: 'Você', status: 'online', abertura: new Date().toISOString(), fundoAbertura: 150, vendasHoje: 12, totalHoje: 487.3 },
   { id: 'cx2', nome: 'Caixa 02', operador: 'Maria Santos', status: 'online', vendasHoje: 8, totalHoje: 312.15 },
   { id: 'cx3', nome: 'Caixa 03', operador: '', status: 'idle', vendasHoje: 0, totalHoje: 0 },
   { id: 'cx4', nome: 'Caixa 04', operador: '', status: 'offline', vendasHoje: 5, totalHoje: 198.7 },
@@ -148,6 +159,91 @@ const genId = () => `v-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 const SALES_KEY = 'syncho_pdv_sales_v2';
 const QUEUE_KEY = 'syncho_pdv_queue_v2';
+const PDV_LOCATION_ID = 'loc-loja';
+const PDV_OPERATOR_ID = 'u-pdv';
+
+type StockMove = {
+  id: string;
+  produtoId: string;
+  tipo: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'TRANSFERENCIA';
+  quantidade: number;
+  localOrigemId: string | null;
+  localDestinoId: string | null;
+  dataHora: string;
+  usuarioId: string;
+  observacao: string;
+};
+
+function calculateStockByProductLocation(movements: StockMove[]) {
+  const map = new Map<string, number>();
+  const keyOf = (productId: string, locationId: string) => `${productId}::${locationId}`;
+
+  for (const movement of movements) {
+    if (movement.tipo === 'ENTRADA' && movement.localDestinoId) {
+      const key = keyOf(movement.produtoId, movement.localDestinoId);
+      map.set(key, Number(map.get(key) || 0) + movement.quantidade);
+    }
+
+    if (movement.tipo === 'SAIDA' && movement.localOrigemId) {
+      const key = keyOf(movement.produtoId, movement.localOrigemId);
+      map.set(key, Number(map.get(key) || 0) - movement.quantidade);
+    }
+
+    if (movement.tipo === 'AJUSTE') {
+      const locationId = movement.localOrigemId || movement.localDestinoId;
+      if (!locationId) continue;
+      const key = keyOf(movement.produtoId, locationId);
+      map.set(key, Number(map.get(key) || 0) + movement.quantidade);
+    }
+
+    if (movement.tipo === 'TRANSFERENCIA' && movement.localOrigemId && movement.localDestinoId) {
+      const fromKey = keyOf(movement.produtoId, movement.localOrigemId);
+      const toKey = keyOf(movement.produtoId, movement.localDestinoId);
+      map.set(fromKey, Number(map.get(fromKey) || 0) - movement.quantidade);
+      map.set(toKey, Number(map.get(toKey) || 0) + movement.quantidade);
+    }
+  }
+
+  return map;
+}
+
+function normalizeCategory(value: string) {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+  return normalized || 'outros';
+}
+
+function buildProductsFromShared(): Product[] {
+  const shared = readSharedProducts().filter((item) => item.enabledInPDV !== false);
+
+  if (!shared.length) {
+    return MOCK_PRODUCTS;
+  }
+
+  const movements = readSharedStockMovements() as StockMove[];
+  const stockMap = calculateStockByProductLocation(movements);
+  const touchedProducts = new Set(movements.map((movement) => String(movement.produtoId || '').trim()));
+
+  return shared.map((item) => {
+    const productId = String(item.id || '').trim();
+    const byMovements = Number(stockMap.get(`${productId}::${PDV_LOCATION_ID}`) || 0);
+    const fallbackQuantity = Math.max(0, Math.floor(Number(item.quantity || 0)));
+
+    return {
+      id: productId,
+      nome: String(item.name || '').trim() || 'Produto',
+      codigo: String(item.barcode || item.code || item.sku || productId).trim(),
+      preco: Number(item.price || 0),
+      estoque: touchedProducts.has(productId) ? Math.max(0, byMovements) : fallbackQuantity,
+      categoria: normalizeCategory(String(item.category || 'outros')),
+      estoqueMinimo: 5,
+    };
+  });
+}
 
 function readLS<T>(key: string, fallback: T): T {
   try {
@@ -210,7 +306,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
   // ── Core state ─────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<PdvTab>('venda');
   const [cart, dispatch] = useReducer(cartReducer, []);
-  const [products, setProducts] = useState<Product[]>(MOCK_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>(() => buildProductsFromShared());
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category>('todos');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -228,10 +324,119 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
     readLS<SaleRecord[]>(QUEUE_KEY, []),
   );
   const [registers, setRegisters] = useState<Register[]>(INITIAL_REGISTERS);
+  const [activeRegisterId, setActiveRegisterId] = useState<string>(INITIAL_REGISTERS[0]?.id || '');
+  const [newRegisterName, setNewRegisterName] = useState('');
+  const [newRegisterOperator, setNewRegisterOperator] = useState('');
+  const [openingAmount, setOpeningAmount] = useState('100');
   const [historySearch, setHistorySearch] = useState('');
   const [historyMethod, setHistoryMethod] = useState<PaymentMethod | 'todos'>('todos');
 
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const activeRegister = useMemo(
+    () => registers.find((register) => register.id === activeRegisterId) || null,
+    [registers, activeRegisterId],
+  );
+
+  const createRegister = () => {
+    const registerName = newRegisterName.trim();
+    const operatorName = newRegisterOperator.trim();
+
+    if (!registerName || !operatorName) {
+      showToast?.('Informe nome do caixa e operador.');
+      return;
+    }
+
+    const createdId = `cx-${Date.now().toString().slice(-6)}`;
+    const openedAt = new Date().toISOString();
+    const openingCash = Math.max(0, Number(openingAmount || 0));
+
+    setRegisters((prev) => [
+      {
+        id: createdId,
+        nome: registerName,
+        operador: operatorName,
+        status: 'online',
+        abertura: openedAt,
+        fundoAbertura: openingCash,
+        vendasHoje: 0,
+        totalHoje: 0,
+      },
+      ...prev,
+    ]);
+    setActiveRegisterId(createdId);
+    setNewRegisterName('');
+    setNewRegisterOperator('');
+    setOpeningAmount('100');
+    showToast?.('Caixa criado e aberto com sucesso.');
+  };
+
+  const openRegister = (registerId: string) => {
+    setRegisters((prev) => prev.map((register) => {
+      if (register.id !== registerId) {
+        return register;
+      }
+
+      return {
+        ...register,
+        status: 'online',
+        abertura: new Date().toISOString(),
+        fechamento: undefined,
+        fundoAbertura: Number(register.fundoAbertura || 0),
+        operador: register.operador || 'Operador',
+      };
+    }));
+    setActiveRegisterId(registerId);
+    showToast?.('Caixa aberto.');
+  };
+
+  const closeRegister = (registerId: string) => {
+    setRegisters((prev) => prev.map((register) => {
+      if (register.id !== registerId) {
+        return register;
+      }
+
+      return {
+        ...register,
+        status: 'idle',
+        fechamento: new Date().toISOString(),
+      };
+    }));
+    showToast?.('Caixa fechado.');
+  };
+
+  const refreshSharedProducts = useCallback((source?: string) => {
+    if (source === 'pdv') {
+      return;
+    }
+
+    setProducts(buildProductsFromShared());
+  }, []);
+
+  useEffect(() => {
+    const onProductsUpdated = () => {
+      refreshSharedProducts();
+    };
+
+    const onStockUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ source?: string }>).detail;
+      refreshSharedProducts(detail?.source);
+    };
+
+    const onStorage = () => {
+      refreshSharedProducts();
+    };
+
+    window.addEventListener(SHARED_PRODUCTS_UPDATED_EVENT, onProductsUpdated);
+    window.addEventListener(SHARED_STOCK_UPDATED_EVENT, onStockUpdated);
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      window.removeEventListener(SHARED_PRODUCTS_UPDATED_EVENT, onProductsUpdated);
+      window.removeEventListener(SHARED_STOCK_UPDATED_EVENT, onStockUpdated);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [refreshSharedProducts]);
 
   // ── Computed ───────────────────────────────────────────────
   const cartSubtotal = useMemo(
@@ -324,6 +529,25 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
   // ── Finalize sale ──────────────────────────────────────────
   const finalizeSale = useCallback(async () => {
     if (!cart.length) return;
+
+    if (!activeRegister || activeRegister.status !== 'online') {
+      showToast?.('Selecione um caixa aberto antes de finalizar a venda.');
+      return;
+    }
+
+    if (!String(activeRegister.operador || '').trim()) {
+      showToast?.('Defina um operador para o caixa ativo.');
+      return;
+    }
+
+    for (const line of cart) {
+      const product = products.find((item) => item.id === line.produto.id);
+      if (!product || line.quantidade > product.estoque) {
+        showToast?.(`⚠️ Estoque insuficiente para ${line.produto.nome}`);
+        return;
+      }
+    }
+
     setIsProcessing(true);
 
     const record: SaleRecord = {
@@ -345,20 +569,29 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
           : cartTotal,
       troco: paymentMethod === 'dinheiro' ? troco : 0,
       status: isOnline ? 'synced' : 'pending',
-      operador: 'Operador Atual',
-      caixa: 'Caixa 01',
+      operador: activeRegister.operador,
+      caixa: activeRegister.nome,
     };
 
     await new Promise<void>((r) => setTimeout(r, 700));
 
-    // Update stock locally
-    setProducts((prev) =>
-      prev.map((p) => {
-        const ci = cart.find((i) => i.produto.id === p.id);
-        if (!ci) return p;
-        return { ...p, estoque: Math.max(0, p.estoque - ci.quantidade) };
-      }),
-    );
+    const now = new Date().toISOString();
+    const stockMovements = readSharedStockMovements() as StockMove[];
+    const saleMovements: StockMove[] = cart.map((line) => ({
+      id: `mv-pdv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      produtoId: line.produto.id,
+      tipo: 'SAIDA',
+      quantidade: line.quantidade,
+      localOrigemId: PDV_LOCATION_ID,
+      localDestinoId: null,
+      dataHora: now,
+      usuarioId: PDV_OPERATOR_ID,
+      observacao: `PDV venda ${record.id}`,
+    }));
+
+    writeSharedStockMovements([...saleMovements, ...stockMovements]);
+    dispatchSharedEvent(SHARED_STOCK_UPDATED_EVENT, { source: 'pdv' });
+    setProducts(buildProductsFromShared());
 
     if (isOnline) {
       setSalesHistory((prev) => {
@@ -376,7 +609,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
 
     setRegisters((prev) =>
       prev.map((r) =>
-        r.id === 'cx1'
+        r.id === activeRegister.id
           ? {
               ...r,
               vendasHoje: r.vendasHoje + 1,
@@ -400,7 +633,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
         ? `✅ Venda de ${fmtBRL(cartTotal)} finalizada!`
         : `📦 Venda de ${fmtBRL(cartTotal)} salva offline`,
     );
-  }, [cart, cartSubtotal, cartDiscount, cartTotal, paymentMethod, valorRecebido, troco, isOnline, showToast]);
+  }, [cart, activeRegister, products, cartSubtotal, cartDiscount, cartTotal, paymentMethod, valorRecebido, troco, isOnline, showToast]);
 
   // ── Reports ────────────────────────────────────────────────
   const todaySales = useMemo(() => {
@@ -509,7 +742,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
     const id = setInterval(() => {
       setRegisters((prev) =>
         prev.map((r) => {
-          if (r.status !== 'online' || r.id === 'cx1') return r;
+          if (r.status !== 'online' || r.id === activeRegisterId) return r;
           if (Math.random() > 0.65) {
             const amount = Math.floor(Math.random() * 80) + 10;
             return {
@@ -524,7 +757,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
       );
     }, 7000);
     return () => clearInterval(id);
-  }, []);
+  }, [activeRegisterId]);
 
   // ── Filtered history ───────────────────────────────────────
   const filteredHistory = useMemo(
@@ -572,7 +805,10 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
     { id: 'ia', label: 'IA', icon: <Zap className="h-4 w-4" /> },
   ];
 
-  const CATEGORIES: Category[] = ['todos', 'alimentos', 'bebidas', 'limpeza', 'higiene', 'outros'];
+  const CATEGORIES: Category[] = useMemo(() => {
+    const categories = Array.from(new Set(products.map((product) => normalizeCategory(product.categoria))));
+    return ['todos', ...categories.sort()];
+  }, [products]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900 text-slate-100">
@@ -588,6 +824,26 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={activeRegisterId}
+            onChange={(event) => setActiveRegisterId(event.target.value)}
+            className="rounded-lg border border-white/10 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-100"
+            style={{ colorScheme: 'dark' }}
+          >
+            {registers.map((register) => (
+              <option key={register.id} value={register.id}>
+                {register.nome}
+              </option>
+            ))}
+          </select>
+          <span className="rounded-lg border border-white/10 bg-slate-800 px-2.5 py-1 text-xs text-slate-300">
+            Operador: {activeRegister?.operador || 'Nao definido'}
+          </span>
+          {activeRegister?.status !== 'online' ? (
+            <span className="rounded-lg bg-rose-500/20 px-2.5 py-1 text-xs font-semibold text-rose-300">
+              Caixa selecionado fechado
+            </span>
+          ) : null}
           {offlineQueue.length > 0 && (
             <span className="flex items-center gap-1.5 rounded-lg bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-300">
               <Clock className="h-3 w-3" />
@@ -1235,6 +1491,37 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                 </span>
               </div>
 
+              <div className="mb-4 grid gap-2 rounded-2xl border border-white/10 bg-slate-800/60 p-4 md:grid-cols-[1.2fr_1fr_1fr_auto]">
+                <input
+                  value={newRegisterName}
+                  onChange={(event) => setNewRegisterName(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 outline-none"
+                  placeholder="Nome do caixa"
+                />
+                <input
+                  value={newRegisterOperator}
+                  onChange={(event) => setNewRegisterOperator(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 outline-none"
+                  placeholder="Operador"
+                />
+                <input
+                  value={openingAmount}
+                  onChange={(event) => setOpeningAmount(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 outline-none"
+                  placeholder="Fundo inicial"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                />
+                <button
+                  type="button"
+                  onClick={createRegister}
+                  className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+                >
+                  Criar caixa
+                </button>
+              </div>
+
               <div className="grid gap-4 lg:grid-cols-2">
                 {registers.map((reg) => (
                   <div
@@ -1256,9 +1543,18 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                         </div>
                         <div>
                           <p className="text-sm font-black text-slate-100">{reg.nome}</p>
-                          <p className="text-xs text-slate-500">
-                            {reg.operador || 'Sem operador'}
-                          </p>
+                          <input
+                            value={reg.operador}
+                            onChange={(event) =>
+                              setRegisters((prev) =>
+                                prev.map((item) =>
+                                  item.id === reg.id ? { ...item, operador: event.target.value } : item,
+                                ),
+                              )
+                            }
+                            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/60 px-2 py-1 text-xs text-slate-100 outline-none"
+                            placeholder="Operador"
+                          />
                         </div>
                       </div>
                       <span
@@ -1297,38 +1593,44 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                       </p>
                     )}
 
+                    {reg.abertura && (
+                      <p className="mt-1 text-[10px] text-slate-500">Abertura: {fmtDate(reg.abertura)}</p>
+                    )}
+
+                    {reg.fechamento && (
+                      <p className="mt-1 text-[10px] text-slate-500">Fechamento: {fmtDate(reg.fechamento)}</p>
+                    )}
+
                     {reg.status !== 'online' && (
                       <button
                         type="button"
-                        onClick={() =>
-                          setRegisters((prev) =>
-                            prev.map((r) =>
-                              r.id === reg.id
-                                ? { ...r, status: 'online', operador: 'Novo Operador' }
-                                : r,
-                            ),
-                          )
-                        }
+                        onClick={() => openRegister(reg.id)}
                         className="mt-3 w-full rounded-xl bg-emerald-500/20 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/30"
                       >
-                        Conectar caixa
+                        Abrir caixa
                       </button>
                     )}
-                    {reg.status === 'online' && reg.id !== 'cx1' && (
+                    {reg.status === 'online' && (
                       <button
                         type="button"
-                        onClick={() =>
-                          setRegisters((prev) =>
-                            prev.map((r) =>
-                              r.id === reg.id ? { ...r, status: 'idle', operador: '' } : r,
-                            ),
-                          )
-                        }
+                        onClick={() => closeRegister(reg.id)}
                         className="mt-3 w-full rounded-xl bg-red-500/10 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/20"
                       >
                         Fechar caixa
                       </button>
                     )}
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveRegisterId(reg.id)}
+                      className={`mt-2 w-full rounded-xl py-2 text-xs font-semibold ${
+                        activeRegisterId === reg.id
+                          ? 'bg-cyan-500/20 text-cyan-300'
+                          : 'bg-slate-700/70 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      {activeRegisterId === reg.id ? 'Caixa ativo' : 'Selecionar como ativo'}
+                    </button>
                   </div>
                 ))}
               </div>

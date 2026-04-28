@@ -1,6 +1,13 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
+  SHARED_PRODUCTS_UPDATED_EVENT,
+  SHARED_STOCK_MOVEMENTS_KEY,
+  SHARED_STOCK_UPDATED_EVENT,
+  dispatchSharedEvent,
+  readSharedProducts,
+} from '../../lib/synchoSharedData';
+import {
   Package,
   Warehouse,
   ArrowLeftRight,
@@ -78,6 +85,9 @@ type MovementForm = {
 
 type InventoryERPWorkspaceProps = {
   showToast?: (msg: string) => void;
+  viewerRole?: 'ADMIN' | 'DEV' | 'CLIENT';
+  companyId?: string;
+  multiStoreEnabled?: boolean;
 };
 
 const PRODUCTS_SEED: Product[] = [
@@ -180,7 +190,8 @@ const nowIso = () => new Date().toISOString();
 const fmtBRL = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
 const fmtDate = (iso: string) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 const movementId = () => `mv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-const STOCK_KEY = 'syncho_stock_movements_v1';
+const DEFAULT_LOCATION_ID = 'loc-loja';
+const LOCATION_CONFIG_KEY = 'syncho_company_locations_v1';
 
 const seedMovements = (): InventoryMovement[] => [
   {
@@ -254,10 +265,10 @@ const seedMovements = (): InventoryMovement[] => [
 
 function readSavedMovements(): InventoryMovement[] {
   try {
-    const raw = localStorage.getItem(STOCK_KEY);
+    const raw = localStorage.getItem(SHARED_STOCK_MOVEMENTS_KEY);
     if (!raw) {
       const seeded = seedMovements();
-      localStorage.setItem(STOCK_KEY, JSON.stringify(seeded));
+      localStorage.setItem(SHARED_STOCK_MOVEMENTS_KEY, JSON.stringify(seeded));
       return seeded;
     }
     const parsed = JSON.parse(raw) as InventoryMovement[];
@@ -269,21 +280,111 @@ function readSavedMovements(): InventoryMovement[] {
 
 function saveMovements(items: InventoryMovement[]) {
   try {
-    localStorage.setItem(STOCK_KEY, JSON.stringify(items));
+    localStorage.setItem(SHARED_STOCK_MOVEMENTS_KEY, JSON.stringify(items));
   } catch {
     // ignore local storage quota failures in mock mode
   }
 }
 
-export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspaceProps) {
-  const [products] = useState<Product[]>(PRODUCTS_SEED);
-  const [locations] = useState<Location[]>(LOCATIONS_SEED);
+function dedupeMovements(items: InventoryMovement[]): InventoryMovement[] {
+  const seen = new Set<string>();
+  const output: InventoryMovement[] = [];
+
+  for (const movement of items) {
+    const id = String(movement.id || '').trim();
+    if (!id || seen.has(id)) {
+      continue;
+    }
+
+    const qty = Number(movement.quantidade || 0);
+    if (movement.tipo === 'AJUSTE') {
+      if (!Number.isFinite(qty) || qty === 0) {
+        continue;
+      }
+    } else if (!Number.isFinite(qty) || qty <= 0) {
+      continue;
+    }
+
+    seen.add(id);
+    output.push(movement);
+  }
+
+  return output;
+}
+
+function readCompanyLocations(companyId: string): Location[] {
+  const normalizedCompanyId = String(companyId || '').trim() || 'global';
+
+  try {
+    const raw = localStorage.getItem(LOCATION_CONFIG_KEY);
+    if (!raw) {
+      return LOCATIONS_SEED;
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, Location[]>;
+    const companyLocations = parsed?.[normalizedCompanyId];
+    if (!Array.isArray(companyLocations) || !companyLocations.length) {
+      return LOCATIONS_SEED;
+    }
+
+    return companyLocations;
+  } catch {
+    return LOCATIONS_SEED;
+  }
+}
+
+function saveCompanyLocations(companyId: string, locations: Location[]) {
+  const normalizedCompanyId = String(companyId || '').trim() || 'global';
+
+  try {
+    const raw = localStorage.getItem(LOCATION_CONFIG_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, Location[]>) : {};
+    parsed[normalizedCompanyId] = locations;
+    localStorage.setItem(LOCATION_CONFIG_KEY, JSON.stringify(parsed));
+  } catch {
+    // ignore storage failures in mock mode
+  }
+}
+
+function loadCatalogFromShared(): Product[] {
+  const shared = readSharedProducts().filter((item) => item.enabledInInventory !== false);
+
+  if (!shared.length) {
+    return PRODUCTS_SEED;
+  }
+
+  return shared.map((item) => ({
+    id: String(item.id || '').trim(),
+    nome: String(item.name || '').trim() || 'Produto',
+    sku: String(item.sku || item.code || '').trim() || `SKU-${String(item.id || '').slice(0, 8)}`,
+    codigoBarras: String(item.barcode || item.code || item.sku || '').trim() || String(item.id || '').trim(),
+    categoria: String(item.category || 'Sem categoria').trim() || 'Sem categoria',
+    marca: 'SYNCHO',
+    precoVenda: Number(item.price || 0),
+    custo: Number(item.cost ?? item.price ?? 0),
+    unidade: 'un',
+    status: item.enabledInInventory === false ? 'INATIVO' : 'ATIVO',
+    estoqueMinimo: 5,
+    permiteNegativo: false,
+    controleLote: false,
+    controleValidade: false,
+  }));
+}
+
+export default function InventoryERPWorkspace({
+  showToast,
+  viewerRole = 'CLIENT',
+  companyId = '',
+  multiStoreEnabled = false,
+}: InventoryERPWorkspaceProps) {
+  const [products, setProducts] = useState<Product[]>(() => loadCatalogFromShared());
+  const [locations, setLocations] = useState<Location[]>(() => readCompanyLocations(companyId));
   const [users] = useState<AppUser[]>(USERS_SEED);
-  const [currentUserId, setCurrentUserId] = useState<string>('u-admin');
+  const [currentUserId, setCurrentUserId] = useState<string>(viewerRole === 'ADMIN' ? 'u-admin' : 'u-op');
   const [allowGlobalNegative, setAllowGlobalNegative] = useState<boolean>(false);
   const [autoBlockNoStock, setAutoBlockNoStock] = useState<boolean>(true);
-  const [pdvRealtimeEnabled, setPdvRealtimeEnabled] = useState<boolean>(true);
-  const [movements, setMovements] = useState<InventoryMovement[]>(() => readSavedMovements());
+  const [pdvRealtimeEnabled, setPdvRealtimeEnabled] = useState<boolean>(false);
+  const [movements, setMovements] = useState<InventoryMovement[]>(() => dedupeMovements(readSavedMovements()));
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [timelineProductId, setTimelineProductId] = useState<string>('');
   const [filterType, setFilterType] = useState<MoveType | 'TODOS'>('TODOS');
@@ -301,14 +402,108 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
     validade: '',
   });
   const [inventoryCountProductId, setInventoryCountProductId] = useState<string>(products[0]?.id || '');
-  const [inventoryCountLocationId, setInventoryCountLocationId] = useState<string>('loc-loja');
+  const [inventoryCountLocationId, setInventoryCountLocationId] = useState<string>(DEFAULT_LOCATION_ID);
   const [inventoryCountValue, setInventoryCountValue] = useState<string>('');
+  const [newLocationName, setNewLocationName] = useState<string>('');
+  const [newLocationType, setNewLocationType] = useState<LocationType>('FILIAL');
+
+  const isSystemAdmin = viewerRole === 'ADMIN';
+  const canUseMultiLocations = isSystemAdmin && multiStoreEnabled;
+  const visibleLocations = useMemo(() => {
+    if (canUseMultiLocations) {
+      return locations.filter((location) => location.ativo);
+    }
+
+    const defaultLocation = locations.find((location) => location.id === DEFAULT_LOCATION_ID) || LOCATIONS_SEED[0];
+    return [defaultLocation];
+  }, [locations, canUseMultiLocations]);
 
   const currentUser = useMemo(() => users.find((user) => user.id === currentUserId) || users[0], [currentUserId, users]);
 
   useEffect(() => {
     saveMovements(movements);
+    dispatchSharedEvent(SHARED_STOCK_UPDATED_EVENT, { source: 'inventory' });
   }, [movements]);
+
+  useEffect(() => {
+    setLocations(readCompanyLocations(companyId));
+  }, [companyId]);
+
+  useEffect(() => {
+    saveCompanyLocations(companyId, locations);
+  }, [companyId, locations]);
+
+  useEffect(() => {
+    const syncProducts = () => {
+      setProducts(loadCatalogFromShared());
+    };
+
+    const syncMovements = (source?: string) => {
+      if (source === 'inventory') {
+        return;
+      }
+
+      setMovements(dedupeMovements(readSavedMovements()));
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SHARED_STOCK_MOVEMENTS_KEY) {
+        syncMovements();
+      }
+    };
+
+    const onProductsUpdated = () => {
+      syncProducts();
+    };
+
+    const onStockUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ source?: string }>).detail;
+      syncMovements(detail?.source);
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(SHARED_PRODUCTS_UPDATED_EVENT, onProductsUpdated);
+    window.addEventListener(SHARED_STOCK_UPDATED_EVENT, onStockUpdated);
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(SHARED_PRODUCTS_UPDATED_EVENT, onProductsUpdated);
+      window.removeEventListener(SHARED_STOCK_UPDATED_EVENT, onStockUpdated);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!products.length) {
+      return;
+    }
+
+    setForm((prev) => {
+      const exists = products.some((product) => product.id === prev.produtoId);
+      if (exists) {
+        return prev;
+      }
+
+      return { ...prev, produtoId: products[0]?.id || '' };
+    });
+
+    setInventoryCountProductId((prev) => {
+      const exists = products.some((product) => product.id === prev);
+      return exists ? prev : products[0]?.id || '';
+    });
+  }, [products]);
+
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      localOrigemId: visibleLocations[0]?.id || DEFAULT_LOCATION_ID,
+      localDestinoId: visibleLocations[0]?.id || DEFAULT_LOCATION_ID,
+    }));
+
+    setInventoryCountLocationId((prev) => {
+      const exists = visibleLocations.some((location) => location.id === prev);
+      return exists ? prev : (visibleLocations[0]?.id || DEFAULT_LOCATION_ID);
+    });
+  }, [visibleLocations]);
 
   const productMap = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const locationMap = useMemo(() => new Map(locations.map((l) => [l.id, l])), [locations]);
@@ -317,8 +512,15 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
   const stockByProductLocation = useMemo(() => {
     const map = new Map<string, number>();
     const keyOf = (productId: string, locationId: string) => `${productId}::${locationId}`;
+    const processedMovements = new Set<string>();
 
     for (const movement of movements) {
+      const movementKey = String(movement.id || '').trim();
+      if (!movementKey || processedMovements.has(movementKey)) {
+        continue;
+      }
+      processedMovements.add(movementKey);
+
       if (movement.tipo === 'ENTRADA' && movement.localDestinoId) {
         const key = keyOf(movement.produtoId, movement.localDestinoId);
         map.set(key, Number(map.get(key) || 0) + movement.quantidade);
@@ -352,10 +554,10 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
 
   const totalByProduct = useMemo(() => {
     return products.map((product) => {
-      const total = locations.reduce((sum, location) => sum + getStock(product.id, location.id), 0);
+      const total = visibleLocations.reduce((sum, location) => sum + getStock(product.id, location.id), 0);
       return { productId: product.id, total };
     });
-  }, [products, locations, stockByProductLocation]);
+  }, [products, visibleLocations, stockByProductLocation]);
 
   const dashboardMetrics = useMemo(() => {
     const totalUnits = totalByProduct.reduce((sum, item) => sum + item.total, 0);
@@ -440,10 +642,52 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
   };
 
   const appendMovement = (movement: InventoryMovement) => {
-    setMovements((prev) => [movement, ...prev]);
+    setMovements((prev) => dedupeMovements([movement, ...prev]));
+  };
+
+  const handleCreateLocation = () => {
+    if (!isSystemAdmin) {
+      showToast?.('Apenas admin do sistema pode criar locais.');
+      return;
+    }
+
+    if (!multiStoreEnabled) {
+      showToast?.('Ative multi-loja para criar filiais e depósitos.');
+      return;
+    }
+
+    const normalizedName = String(newLocationName || '').trim();
+    if (!normalizedName) {
+      showToast?.('Informe o nome do local.');
+      return;
+    }
+
+    const locationId = `loc-${normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    if (locations.some((location) => location.id === locationId)) {
+      showToast?.('Ja existe um local com esse nome.');
+      return;
+    }
+
+    setLocations((prev) => [
+      ...prev,
+      {
+        id: locationId,
+        nome: normalizedName,
+        tipo: newLocationType,
+        ativo: true,
+      },
+    ]);
+    setNewLocationName('');
+    setNewLocationType('FILIAL');
+    showToast?.('Local criado com sucesso.');
   };
 
   const handleSubmitMovement = () => {
+    if (!form.tipo) {
+      showToast?.('Selecione o tipo de movimentacao.');
+      return;
+    }
+
     if (!form.produtoId) {
       showToast?.('Selecione um produto.');
       return;
@@ -547,6 +791,11 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
     }
 
     if (form.tipo === 'TRANSFERENCIA') {
+      if (!canUseMultiLocations) {
+        showToast?.('Transferencia entre locais disponivel apenas com multi-loja habilitado pelo admin.');
+        return;
+      }
+
       if (!form.localOrigemId || !form.localDestinoId) {
         showToast?.('Informe origem e destino.');
         return;
@@ -577,7 +826,7 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
       showToast?.(`Transferencia registrada: ${qty} ${product.unidade}`);
     }
 
-    setForm((prev) => ({ ...prev, quantidade: '', observacao: '' }));
+    setForm((prev) => ({ ...prev, quantidade: '', observacao: '', lote: '', validade: '' }));
   };
 
   const handlePhysicalInventory = () => {
@@ -830,7 +1079,7 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
                 style={{ colorScheme: 'dark' }}
               >
                 <option value="">Nao se aplica</option>
-                {locations.map((location) => (
+                {visibleLocations.map((location) => (
                   <option key={location.id} value={location.id}>
                     {location.nome}
                   </option>
@@ -847,7 +1096,7 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
                 style={{ colorScheme: 'dark' }}
               >
                 <option value="">Nao se aplica</option>
-                {locations.map((location) => (
+                {visibleLocations.map((location) => (
                   <option key={location.id} value={location.id}>
                     {location.nome}
                   </option>
@@ -929,7 +1178,7 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
                 className="rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-sm text-slate-100 outline-none"
                 style={{ colorScheme: 'dark' }}
               >
-                {locations.map((location) => (
+                {visibleLocations.map((location) => (
                   <option key={location.id} value={location.id}>
                     {location.nome}
                   </option>
@@ -982,6 +1231,11 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
                   onChange={(event) => setPdvRealtimeEnabled(event.target.checked)}
                 />
               </label>
+              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-400">
+                {canUseMultiLocations
+                  ? 'Multi-loja habilitado para esta empresa. Transferencias entre locais liberadas para admin.'
+                  : 'Modo loja unica: apenas o estoque da loja padrao fica visivel para usuarios comuns.'}
+              </div>
             </div>
           </div>
 
@@ -1025,7 +1279,7 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
                 <th className="px-3 py-2 text-left">Categoria</th>
                 <th className="px-3 py-2 text-right">Preco venda</th>
                 <th className="px-3 py-2 text-right">Custo</th>
-                {locations.map((location) => (
+                {visibleLocations.map((location) => (
                   <th key={location.id} className="px-3 py-2 text-right">{location.nome}</th>
                 ))}
                 <th className="px-3 py-2 text-right">Total</th>
@@ -1034,7 +1288,7 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
             </thead>
             <tbody>
               {products.map((product) => {
-                const byLocation = locations.map((location) => ({
+                const byLocation = visibleLocations.map((location) => ({
                   locationId: location.id,
                   qty: getStock(product.id, location.id),
                 }));
@@ -1322,8 +1576,35 @@ export default function InventoryERPWorkspace({ showToast }: InventoryERPWorkspa
           <Warehouse className="h-4 w-4 text-emerald-300" />
           Locais multi-estoque
         </h2>
+        {isSystemAdmin ? (
+          <div className="mt-4 grid gap-2 rounded-xl border border-white/10 bg-slate-950/50 p-3 md:grid-cols-[1.2fr_1fr_auto]">
+            <input
+              value={newLocationName}
+              onChange={(event) => setNewLocationName(event.target.value)}
+              className="rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none"
+              placeholder="Nome do novo local"
+            />
+            <select
+              value={newLocationType}
+              onChange={(event) => setNewLocationType(event.target.value as LocationType)}
+              className="rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none"
+              style={{ colorScheme: 'dark' }}
+            >
+              <option value="LOJA">Loja</option>
+              <option value="DEPOSITO">Deposito</option>
+              <option value="FILIAL">Filial</option>
+            </select>
+            <button
+              type="button"
+              onClick={handleCreateLocation}
+              className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
+            >
+              Criar local
+            </button>
+          </div>
+        ) : null}
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          {locations.map((location) => (
+          {visibleLocations.map((location) => (
             <article key={location.id} className="rounded-xl border border-white/10 bg-slate-950/50 p-3">
               <h3 className="text-sm font-bold text-slate-100">{location.nome}</h3>
               <p className="mt-1 text-xs text-slate-500">Tipo: {location.tipo}</p>
