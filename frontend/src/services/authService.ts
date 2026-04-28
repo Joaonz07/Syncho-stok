@@ -279,7 +279,7 @@ export const authService = {
           empresa = buildEmpresa(meResult?.company || meResult?.empresa || empresa, user.empresaId);
         }
 
-        if (!user.empresaId) {
+        if (user.role === 'funcionario' && !user.empresaId) {
           throw new Error('Usuario nao possui empresa vinculada.');
         }
 
@@ -358,7 +358,7 @@ export const authService = {
         const result = await response.json();
         const user = buildUser(result?.user || {}, String(result?.user?.companyId || ''));
 
-        if (!user.empresaId) {
+        if (user.role === 'funcionario' && !user.empresaId) {
           return null;
         }
 
