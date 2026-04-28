@@ -116,6 +116,10 @@ app.get('/health', (_req, res) => {
 	res.json({ status: 'OK' });
 });
 
+app.get('/', (_req, res) => {
+	res.status(200).json({ status: 'OK' });
+});
+
 if (canServeFrontend) {
 	app.get('*', (_req, res) => {
 		res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
