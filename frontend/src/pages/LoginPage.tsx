@@ -1,4 +1,4 @@
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -231,9 +231,7 @@ const LoginPage = () => {
                   />
                   Lembrar senha
                 </label>
-                <Link to="/register" className="text-cyan-300 transition hover:text-cyan-200">
-                  Criar conta
-                </Link>
+                <span className="text-xs text-slate-400">Cadastro somente por admin</span>
               </div>
 
               <motion.button
@@ -264,10 +262,7 @@ const LoginPage = () => {
             </AnimatePresence>
 
             <p className="mt-6 text-center text-sm text-slate-400">
-              Novo por aqui?{' '}
-              <Link to="/register" className="font-semibold text-cyan-300 transition hover:text-cyan-200">
-                Criar conta
-              </Link>
+              Para novos acessos, solicite criacao de conta ao administrador.
             </p>
           </div>
         </motion.section>
