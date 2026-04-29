@@ -850,6 +850,16 @@ const getInventoryByProductWithAliases = async (productId: string, companyId: st
   };
 };
 
+const isMissingInventoryStorageError = (message: string) => {
+  const normalized = String(message || '').toLowerCase();
+
+  return (
+    normalized.includes('could not find the table') ||
+    normalized.includes('relation') && normalized.includes('does not exist') ||
+    normalized.includes('schema cache')
+  );
+};
+
 const listInventoryByCompanyWithAliases = async (companyId: string) => {
   for (const tableName of tableAliases.inventory) {
     for (const companyField of companyFieldAliases) {
@@ -874,6 +884,7 @@ const listInventoryByCompanyWithAliases = async (companyId: string) => {
 const createInventoryRecordWithAliases = async (productId: string, companyId: string, quantity = 0) => {
   const normalizedQuantity = Number.isFinite(quantity) && quantity >= 0 ? Math.floor(quantity) : 0;
   let lastError: string | null = null;
+  let hasNonMissingTableError = false;
 
   for (const tableName of tableAliases.inventory) {
     for (const companyField of companyFieldAliases) {
@@ -905,12 +916,29 @@ const createInventoryRecordWithAliases = async (productId: string, companyId: st
             return response;
           }
 
+          if (response.error?.message && !isMissingInventoryStorageError(response.error.message)) {
+            hasNonMissingTableError = true;
+          }
+
           if (!lastError) {
             lastError = `${tableName}: ${response.error?.message || 'erro ao criar estoque inicial'}`;
           }
         }
       }
     }
+  }
+
+  // Em bancos antigos sem tabela de estoque, segue o fluxo usando products.quantity.
+  if (!hasNonMissingTableError) {
+    return {
+      data: {
+        product_id: productId,
+        company_id: companyId,
+        quantity: normalizedQuantity,
+        fallback: true
+      },
+      error: null
+    };
   }
 
   return {
@@ -922,6 +950,7 @@ const createInventoryRecordWithAliases = async (productId: string, companyId: st
 const updateInventoryQuantityWithAliases = async (productId: string, companyId: string, quantity: number) => {
   const normalizedQuantity = Number.isFinite(quantity) && quantity >= 0 ? Math.floor(quantity) : 0;
   let lastError: string | null = null;
+  let hasNonMissingTableError = false;
 
   for (const tableName of tableAliases.inventory) {
     for (const companyField of companyFieldAliases) {
@@ -945,6 +974,10 @@ const updateInventoryQuantityWithAliases = async (productId: string, companyId: 
             return response;
           }
 
+          if (response.error?.message && !isMissingInventoryStorageError(response.error.message)) {
+            hasNonMissingTableError = true;
+          }
+
           if (!lastError) {
             lastError = `${tableName}: ${response.error?.message || 'erro ao atualizar estoque'}`;
           }
@@ -957,6 +990,26 @@ const updateInventoryQuantityWithAliases = async (productId: string, companyId: 
 
   if (!created.error) {
     return created;
+  }
+
+  // Fallback definitivo: mantém consistência no campo products.quantity quando não há tabela de estoque.
+  if (!hasNonMissingTableError && isMissingInventoryStorageError(lastError || created.error.message)) {
+    const productUpdated = await updateProductWithAliases(productId, companyId, {
+      quantity: normalizedQuantity
+    });
+
+    if (!productUpdated.error) {
+      return {
+        data: {
+          ...(productUpdated.data as Record<string, unknown>),
+          product_id: productId,
+          company_id: companyId,
+          quantity: normalizedQuantity,
+          fallback: true
+        },
+        error: null
+      };
+    }
   }
 
   return {
