@@ -21,6 +21,9 @@ import {
   Bell,
   Cpu,
 } from 'lucide-react';
+import HelpIntroCard from '../help/HelpIntroCard';
+import HelpTooltip from '../help/HelpTooltip';
+import { registerHelpVisit } from '../../lib/helpProgress';
 
 type UserRole = 'ADMIN' | 'OPERADOR' | 'AUDITOR';
 type ProductStatus = 'ATIVO' | 'INATIVO';
@@ -347,7 +350,7 @@ function saveCompanyLocations(companyId: string, locations: Location[]) {
 }
 
 function loadCatalogFromShared(): Product[] {
-  const shared = readSharedProducts().filter((item) => item.enabledInInventory !== false);
+  const shared = readSharedProducts();
 
   if (!shared.length) {
     return PRODUCTS_SEED;
@@ -405,6 +408,7 @@ export default function InventoryERPWorkspace({
   const [inventoryCountValue, setInventoryCountValue] = useState<string>('');
   const [newLocationName, setNewLocationName] = useState<string>('');
   const [newLocationType, setNewLocationType] = useState<LocationType>('FILIAL');
+  const [showHelpCard, setShowHelpCard] = useState(true);
 
   const isSystemAdmin = viewerRole === 'ADMIN';
   const canUseMultiLocations = isSystemAdmin && multiStoreEnabled;
@@ -469,6 +473,11 @@ export default function InventoryERPWorkspace({
       window.removeEventListener(SHARED_PRODUCTS_UPDATED_EVENT, onProductsUpdated);
       window.removeEventListener(SHARED_STOCK_UPDATED_EVENT, onStockUpdated);
     };
+  }, []);
+
+  useEffect(() => {
+    const visits = registerHelpVisit('workspace:inventory');
+    setShowHelpCard(visits <= 2);
   }, []);
 
   useEffect(() => {
@@ -704,8 +713,8 @@ export default function InventoryERPWorkspace({
       return;
     }
 
-    if (product.status !== 'ATIVO') {
-      showToast?.('Produto inativo nao pode movimentar.');
+    if (product.status !== 'ATIVO' && (form.tipo === 'SAIDA' || form.tipo === 'TRANSFERENCIA')) {
+      showToast?.('Produto inativo nao pode sair nem transferir. Use entrada ou ajuste para corrigir saldo.');
       return;
     }
 
@@ -956,6 +965,27 @@ export default function InventoryERPWorkspace({
           </div>
         </div>
 
+        <div className="mt-4">
+          {showHelpCard ? (
+            <HelpIntroCard
+              title="Controle de estoque"
+              description="Aqui voce corrige saldo, registra entradas e saidas e acompanha alertas de falta."
+              example="Exemplo: contar um produto na prateleira e ajustar a diferenca em Inventario fisico."
+              isDarkTheme
+              onClose={() => setShowHelpCard(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowHelpCard(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-white/10"
+            >
+              Ajuda rapida
+              <HelpTooltip text="Guia simples para ajustar estoque sem erro." />
+            </button>
+          )}
+        </div>
+
         <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           <article className="rounded-xl border border-white/10 bg-slate-950/50 p-3">
             <p className="text-xs uppercase tracking-wide text-slate-500">Total em estoque</p>
@@ -982,6 +1012,7 @@ export default function InventoryERPWorkspace({
             <h2 className="inline-flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-200">
               <Activity className="h-4 w-4 text-cyan-300" />
               Registrar movimentacao
+              <HelpTooltip text="Use para dar entrada, saida, ajuste ou transferencia de produtos." />
             </h2>
             <select
               value={currentUserId}
@@ -1128,6 +1159,7 @@ export default function InventoryERPWorkspace({
             <h2 className="inline-flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-200">
               <ClipboardCheck className="h-4 w-4 text-emerald-300" />
               Inventario fisico
+              <HelpTooltip text="Quando o saldo da prateleira nao bate com o sistema, ajuste por aqui." />
             </h2>
             <div className="mt-3 grid gap-2">
               <select
@@ -1231,6 +1263,7 @@ export default function InventoryERPWorkspace({
         <h2 className="inline-flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-200">
           <Warehouse className="h-4 w-4 text-cyan-300" />
           Estoque por produto e local
+          <HelpTooltip text="Tabela para ver quanto tem de cada produto em cada local." />
         </h2>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[980px] text-sm">
@@ -1246,6 +1279,7 @@ export default function InventoryERPWorkspace({
                 ))}
                 <th className="px-3 py-2 text-right">Total</th>
                 <th className="px-3 py-2 text-right">Status</th>
+                <th className="px-3 py-2 text-right">Acoes</th>
               </tr>
             </thead>
             <tbody>
@@ -1283,6 +1317,21 @@ export default function InventoryERPWorkspace({
                         {zero ? 'ZERADO' : low ? 'BAIXO' : 'OK'}
                       </span>
                     </td>
+                    <td className="px-3 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const defaultLocationId = visibleLocations[0]?.id || DEFAULT_LOCATION_ID;
+                          setInventoryCountProductId(product.id);
+                          setInventoryCountLocationId(defaultLocationId);
+                          setInventoryCountValue(String(total));
+                          showToast?.('Produto carregado no Inventario fisico para edicao de saldo.');
+                        }}
+                        className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/20"
+                      >
+                        Editar saldo
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -1296,6 +1345,7 @@ export default function InventoryERPWorkspace({
           <h2 className="inline-flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-200">
             <ArrowLeftRight className="h-4 w-4 text-cyan-300" />
             Historico de movimentacoes
+            <HelpTooltip text="Lista tudo que entrou, saiu ou foi ajustado no estoque." />
           </h2>
 
           <div className="flex flex-wrap items-center gap-2">

@@ -57,6 +57,9 @@ import InventoryERPWorkspace from '../components/modules/InventoryERPWorkspace';
 import TasksKanbanWorkspace from '../components/modules/TasksKanbanWorkspace';
 import RootAdminWorkspace from '../components/admin/RootAdminWorkspace';
 import SettingsWorkspace from '../components/settings/SettingsWorkspace';
+import HelpIntroCard from '../components/help/HelpIntroCard';
+import HelpTooltip from '../components/help/HelpTooltip';
+import { registerHelpVisit, resetHelpProgress } from '../lib/helpProgress';
 
 type LeadStatus =
   | 'NOVO_CONTATO'
@@ -261,6 +264,99 @@ type AdminPlanConfig = {
 
 type DashboardView = 'pipeline' | 'companies' | 'clients' | 'products' | 'inventory' | 'settings' | 'sales' | 'chat' | 'analytics' | 'admin' | 'integrations' | 'tasks' | 'agenda' | 'budgets' | 'pages';
 type SidebarPath = DashboardView | 'pdv';
+
+const beginnerHelpByView: Record<DashboardView, { title: string; description: string; example: string; tooltip: string }> = {
+  pipeline: {
+    title: 'Funil de clientes',
+    description: 'Aqui voce acompanha em que etapa cada cliente esta, desde o primeiro contato ate o fechamento.',
+    example: 'Exemplo: mover um cliente de "Em contato" para "Negociacao".',
+    tooltip: 'Use esta tela para saber quem precisa de retorno hoje.'
+  },
+  companies: {
+    title: 'Empresas',
+    description: 'Aqui voce organiza as empresas cadastradas no sistema.',
+    example: 'Exemplo: selecionar uma empresa para ver produtos e vendas dela.',
+    tooltip: 'Escolha a empresa certa antes de cadastrar ou editar dados.'
+  },
+  clients: {
+    title: 'Clientes',
+    description: 'Aqui voce gerencia usuarios e clientes da empresa.',
+    example: 'Exemplo: criar um novo usuario operador para o time.',
+    tooltip: 'Use nomes claros para facilitar a busca depois.'
+  },
+  products: {
+    title: 'Produtos',
+    description: 'Aqui voce cadastra o que vende e ajusta preco, custo e dados do produto.',
+    example: 'Exemplo: trocar o preco de um item sem mexer no estoque.',
+    tooltip: 'Cadastro correto aqui ajuda estoque, vendas e PDV funcionarem melhor.'
+  },
+  inventory: {
+    title: 'Estoque',
+    description: 'Aqui voce controla a quantidade automaticamente por entradas, saidas e ajustes.',
+    example: 'Exemplo: corrigir a contagem fisica de um produto no fim do dia.',
+    tooltip: 'Se faltar produto no estoque, o sistema avisa para voce agir antes.'
+  },
+  settings: {
+    title: 'Configuracoes',
+    description: 'Aqui voce ajusta dados importantes da conta e da empresa.',
+    example: 'Exemplo: atualizar plano ou senha de acesso.',
+    tooltip: 'Mantenha os dados da empresa sempre atualizados.'
+  },
+  sales: {
+    title: 'Vendas',
+    description: 'Aqui voce registra vendas, escolhe pagamento e acompanha historico.',
+    example: 'Exemplo: finalizar uma venda em PIX e conferir no historico.',
+    tooltip: 'Confira o total e a forma de pagamento antes de concluir.'
+  },
+  chat: {
+    title: 'Chat e suporte',
+    description: 'Aqui voce conversa com suporte e acompanha solicitacoes.',
+    example: 'Exemplo: abrir chamado quando algo nao funcionar como esperado.',
+    tooltip: 'Descreva o problema com detalhes para acelerar a resposta.'
+  },
+  analytics: {
+    title: 'Analise',
+    description: 'Aqui voce entende o que esta vendendo bem e onde melhorar.',
+    example: 'Exemplo: ver produtos com mais lucro e itens com baixo estoque.',
+    tooltip: 'Use esta tela para decidir o que repor, promover ou ajustar.'
+  },
+  admin: {
+    title: 'Admin',
+    description: 'Aqui ficam controles gerais da plataforma para administracao.',
+    example: 'Exemplo: revisar configuracoes globais de uso.',
+    tooltip: 'Altere esta area com cuidado, pois impacta mais pessoas.'
+  },
+  integrations: {
+    title: 'Integracoes',
+    description: 'Aqui voce conecta o SYNCHO com outros sistemas.',
+    example: 'Exemplo: configurar webhook para receber eventos de venda.',
+    tooltip: 'Teste a integracao com poucos dados antes de usar em producao.'
+  },
+  tasks: {
+    title: 'Tarefas',
+    description: 'Aqui voce organiza atividades do time.',
+    example: 'Exemplo: criar tarefa para reposicao de produtos.',
+    tooltip: 'Quebre tarefas grandes em passos pequenos para facilitar.'
+  },
+  agenda: {
+    title: 'Agenda',
+    description: 'Aqui voce agenda compromissos e acompanhamentos.',
+    example: 'Exemplo: marcar retorno com cliente para amanha.',
+    tooltip: 'Use lembretes para nao perder prazos importantes.'
+  },
+  budgets: {
+    title: 'Orcamentos',
+    description: 'Aqui voce cria e acompanha orcamentos enviados.',
+    example: 'Exemplo: montar proposta simples para um cliente novo.',
+    tooltip: 'Mantenha valores e condicoes claros para o cliente.'
+  },
+  pages: {
+    title: 'Paginas',
+    description: 'Aqui voce gerencia paginas e conteudos internos.',
+    example: 'Exemplo: atualizar texto de uma pagina da empresa.',
+    tooltip: 'Revise o conteudo antes de publicar para evitar erros.'
+  }
+};
 
 type SidebarGroup = 'Comercial' | 'Operacao' | 'Sistema';
 
@@ -839,6 +935,7 @@ const Dashboard = () => {
   const [activeMenuName, setActiveMenuName] = useState('Vendas');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [showHelpCard, setShowHelpCard] = useState(true);
   const [formColumn, setFormColumn] = useState<LeadStatus | null>('NOVO_CONTATO');
 
   const [name, setName] = useState('');
@@ -1502,6 +1599,13 @@ const Dashboard = () => {
     return salesCustomerOptions.find((customer) => customer.id === saleCustomerId)?.name || null;
   }, [saleCustomerId, salesCustomerOptions]);
 
+  const currentViewHelp = beginnerHelpByView[activeView] || beginnerHelpByView.pipeline;
+
+  useEffect(() => {
+    const visits = registerHelpVisit(`dashboard:${activeView}`);
+    setShowHelpCard(visits <= 2);
+  }, [activeView]);
+
   const salesCartItems = useMemo(() => {
     return saleLines
       .map((line) => {
@@ -1834,13 +1938,31 @@ const Dashboard = () => {
   }, [growthPercent, salesAnalysis]);
 
   const inventoryAnalytics = useMemo(() => {
-    const lowStock = salesAnalysis?.lowStockProducts || [];
-    const noSales = salesAnalysis?.productsWithoutSales || [];
+    const activeInventoryProducts = products.filter((product) => {
+      const isEnabledInInventory = product.enabledInInventory !== false;
+      const rawStatus = String(product.status || 'ACTIVE').trim().toUpperCase();
+      const isActive = rawStatus !== 'INACTIVE' && rawStatus !== 'INATIVO';
+      return isEnabledInInventory && isActive;
+    });
+
+    const lowStock = activeInventoryProducts
+      .filter((product) => Number(product.quantity || 0) <= 5)
+      .sort((left, right) => Number(left.quantity || 0) - Number(right.quantity || 0))
+      .map((product) => ({
+        id: String(product.id || ''),
+        name: String(product.name || 'Produto sem nome'),
+        code: String(product.code || ''),
+        quantity: Number(product.quantity || 0),
+        price: Number(product.price || 0)
+      }));
+
+    const activeProductIds = new Set(activeInventoryProducts.map((product) => String(product.id || '').trim()));
+    const noSales = (salesAnalysis?.productsWithoutSales || []).filter((product) => activeProductIds.has(String(product.productId || '').trim()));
     const stagnant = noSales
       .filter((product) => Number(product.quantity || 0) > 0)
       .sort((left, right) => Number(right.quantity || 0) - Number(left.quantity || 0));
-    const stockHealthPercent = products.length > 0
-      ? Math.max(0, ((products.length - lowStock.length) / products.length) * 100)
+    const stockHealthPercent = activeInventoryProducts.length > 0
+      ? Math.max(0, ((activeInventoryProducts.length - lowStock.length) / activeInventoryProducts.length) * 100)
       : 100;
 
     return {
@@ -1849,7 +1971,7 @@ const Dashboard = () => {
       stagnant,
       stockHealthPercent
     };
-  }, [products.length, salesAnalysis]);
+  }, [products, salesAnalysis]);
 
   const executiveSnapshot = useMemo(() => {
     const totalRevenue = Number(salesAnalysis?.totalRevenue || 0);
@@ -5050,6 +5172,32 @@ const Dashboard = () => {
               className="page-content"
             >
 
+          {showHelpCard ? (
+            <HelpIntroCard
+              title={currentViewHelp.title}
+              description={currentViewHelp.description}
+              example={currentViewHelp.example}
+              isDarkTheme={isDarkTheme}
+              onClose={() => setShowHelpCard(false)}
+            />
+          ) : (
+            <div className="mb-3">
+              <button
+                type="button"
+                onClick={() => setShowHelpCard(true)}
+                className={[
+                  'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold',
+                  isDarkTheme
+                    ? 'border-white/15 bg-white/5 text-cyan-200 hover:bg-white/10'
+                    : 'border-slate-300 bg-white text-cyan-700 hover:bg-slate-50'
+                ].join(' ')}
+              >
+                Ajuda rapida
+                <HelpTooltip text={currentViewHelp.tooltip} isDarkTheme={isDarkTheme} />
+              </button>
+            </div>
+          )}
+
           {/* ── VIEW: PIPELINE ── */}
 
           {/* ── VIEW: PIPELINE ── */}
@@ -5062,7 +5210,10 @@ const Dashboard = () => {
             className="mb-5 space-y-4"
           >
             <header>
-              <h1 className="text-2xl font-bold text-white md:text-3xl">Bem-vindo de volta, {displayUserName || 'Usuário'}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold text-white md:text-3xl">Bem-vindo de volta, {displayUserName || 'Usuário'}</h1>
+                <HelpTooltip text={beginnerHelpByView.pipeline.tooltip} isDarkTheme />
+              </div>
               <p className="mt-1 text-sm text-gray-400">Acompanhe o desempenho do seu negocio em tempo real</p>
             </header>
 
@@ -5812,7 +5963,10 @@ const Dashboard = () => {
           {activeView === 'products' ? (
             <div className="grid gap-6">
               <div className={themedPanelClass}>
-                <h1 className={themedTitleClass}>Produtos</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className={themedTitleClass}>Produtos</h1>
+                  <HelpTooltip text={beginnerHelpByView.products.tooltip} isDarkTheme={isDarkTheme} />
+                </div>
                 <p className={['mt-1', themedSubtextClass].join(' ')}>Base unica para cadastro, estoque e PDV.</p>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -6303,6 +6457,38 @@ const Dashboard = () => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
             >
+              <div className={[
+                'mb-4 rounded-2xl border px-4 py-3',
+                isDarkTheme ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white'
+              ].join(' ')}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>
+                      Treinamento para novos operadores
+                    </p>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Reinicia os cards de ajuda para aparecerem novamente nas primeiras visitas.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetHelpProgress();
+                      setShowHelpCard(true);
+                      showToast('Tutorial reiniciado. A ajuda completa sera mostrada novamente.');
+                    }}
+                    className={[
+                      'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors',
+                      isDarkTheme
+                        ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
+                        : 'border-cyan-300 bg-cyan-50 text-cyan-700 hover:bg-cyan-100'
+                    ].join(' ')}
+                  >
+                    Ver tutorial novamente
+                  </button>
+                </div>
+              </div>
+
               <SettingsWorkspace
                 role={role ?? 'CLIENT'}
                 displayUserName={displayUserName || 'Usuario'}
@@ -6644,7 +6830,10 @@ const Dashboard = () => {
                   ? 'border border-white/10 bg-white/5 shadow-cyan-900/20 backdrop-blur-md'
                   : 'border border-slate-200 bg-white'
               ].join(' ')}>
-                <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Vendas</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Vendas</h1>
+                  <HelpTooltip text={beginnerHelpByView.sales.tooltip} isDarkTheme={isDarkTheme} />
+                </div>
                 <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-500'].join(' ')}>Sistema completo de vendas com CRM + PDV: seleção de produtos, carrinho, cliente opcional, pagamento e histórico.</p>
 
                 {role === 'ADMIN' ? (
@@ -7107,9 +7296,12 @@ const Dashboard = () => {
               >
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="space-y-1">
-                    <h1 className={['text-2xl font-black tracking-tight', isDarkTheme ? 'text-cyan-100' : 'text-slate-900'].join(' ')}>
-                      Análise Estratégica SYNCHO CRM
-                    </h1>
+                    <div className="flex items-center gap-2">
+                      <h1 className={['text-2xl font-black tracking-tight', isDarkTheme ? 'text-cyan-100' : 'text-slate-900'].join(' ')}>
+                        Análise Estratégica SYNCHO CRM
+                      </h1>
+                      <HelpTooltip text={beginnerHelpByView.analytics.tooltip} isDarkTheme={isDarkTheme} />
+                    </div>
                     <p className={['text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>
                       Decisões guiadas por funil, lucro real, comportamento de clientes e inteligência de estoque.
                     </p>

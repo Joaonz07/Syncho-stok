@@ -40,6 +40,9 @@ import {
   ReceiptText,
   Eye,
 } from 'lucide-react';
+import HelpIntroCard from '../help/HelpIntroCard';
+import HelpTooltip from '../help/HelpTooltip';
+import { registerHelpVisit } from '../../lib/helpProgress';
 
 // ─── TYPES ──────────────────────────────────────────────────
 
@@ -330,8 +333,14 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
   const [openingAmount, setOpeningAmount] = useState('100');
   const [historySearch, setHistorySearch] = useState('');
   const [historyMethod, setHistoryMethod] = useState<PaymentMethod | 'todos'>('todos');
+  const [showHelpCard, setShowHelpCard] = useState(true);
 
   const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const visits = registerHelpVisit('workspace:pdv');
+    setShowHelpCard(visits <= 2);
+  }, []);
 
   const activeRegister = useMemo(
     () => registers.find((register) => register.id === activeRegisterId) || null,
@@ -797,7 +806,10 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
             <Store className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-base font-black text-slate-100">PDV SYNCHO</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-black text-slate-100">PDV SYNCHO</h2>
+              <HelpTooltip text="Aqui voce faz vendas: escolhe produtos, recebe pagamento e finaliza o pedido." />
+            </div>
             <p className="text-xs text-slate-400">Ponto de venda profissional</p>
           </div>
         </div>
@@ -862,6 +874,27 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
             <span className="hidden sm:inline">{tab.label}</span>
           </button>
         ))}
+      </div>
+
+      <div className="shrink-0 px-4 pt-3">
+        {showHelpCard ? (
+          <HelpIntroCard
+            title="Tela de vendas"
+            description="Aqui voce faz vendas rapidas. Primeiro selecione os produtos, depois escolha o pagamento e conclua."
+            example="Exemplo: adicionar 2 itens no carrinho, escolher PIX e finalizar a venda."
+            isDarkTheme
+            onClose={() => setShowHelpCard(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowHelpCard(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-white/10"
+          >
+            Ajuda rapida
+            <HelpTooltip text="Resumo rapido para vender em poucos passos." />
+          </button>
+        )}
       </div>
 
       {/* ── CONTENT ── */}
@@ -980,7 +1013,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                 {/* Cart header */}
                 <div className="shrink-0 border-b border-white/10 bg-slate-900/40 px-4 py-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-black text-slate-100">Carrinho</span>
+                    <span className="inline-flex items-center gap-2 text-sm font-black text-slate-100">Carrinho <HelpTooltip text="Revise os itens antes de cobrar. Aqui voce altera quantidade ou remove produtos." /></span>
                     <div className="flex items-center gap-2">
                       {cart.length > 0 && (
                         <button
