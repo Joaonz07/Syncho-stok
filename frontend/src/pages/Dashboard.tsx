@@ -3818,7 +3818,7 @@ const Dashboard = () => {
       }
 
       if (!response.ok) {
-        setStatus(result.message || 'Falha ao criar produto.');
+        setStatus(result.detail ? `${result.message || 'Falha ao criar produto.'} (${result.detail})` : (result.message || 'Falha ao criar produto.'));
         return;
       }
 

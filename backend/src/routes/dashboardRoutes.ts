@@ -873,21 +873,41 @@ const listInventoryByCompanyWithAliases = async (companyId: string) => {
 
 const createInventoryRecordWithAliases = async (productId: string, companyId: string, quantity = 0) => {
   const normalizedQuantity = Number.isFinite(quantity) && quantity >= 0 ? Math.floor(quantity) : 0;
+  let lastError: string | null = null;
 
   for (const tableName of tableAliases.inventory) {
     for (const companyField of companyFieldAliases) {
       for (const productField of productFieldAliases) {
-        const payload = {
-          [companyField]: companyId,
-          [productField]: productId,
-          quantity: normalizedQuantity,
-          updated_at: new Date().toISOString()
-        };
+        const payloadCandidates: Array<Record<string, unknown>> = [
+          {
+            [companyField]: companyId,
+            [productField]: productId,
+            quantity: normalizedQuantity
+          },
+          {
+            [companyField]: companyId,
+            [productField]: productId,
+            quantity: normalizedQuantity,
+            updated_at: new Date().toISOString()
+          },
+          {
+            [companyField]: companyId,
+            [productField]: productId,
+            quantity: normalizedQuantity,
+            updatedAt: new Date().toISOString()
+          }
+        ];
 
-        const response = await supabaseAdmin.from(tableName).insert(payload).select('*').single();
+        for (const payload of payloadCandidates) {
+          const response = await supabaseAdmin.from(tableName).insert(payload).select('*').single();
 
-        if (!response.error && response.data) {
-          return response;
+          if (!response.error && response.data) {
+            return response;
+          }
+
+          if (!lastError) {
+            lastError = `${tableName}: ${response.error?.message || 'erro ao criar estoque inicial'}`;
+          }
         }
       }
     }
@@ -895,32 +915,56 @@ const createInventoryRecordWithAliases = async (productId: string, companyId: st
 
   return {
     data: null,
-    error: { message: 'Falha ao criar registro inicial de estoque.' }
+    error: { message: lastError || 'Falha ao criar registro inicial de estoque.' }
   };
 };
 
 const updateInventoryQuantityWithAliases = async (productId: string, companyId: string, quantity: number) => {
   const normalizedQuantity = Number.isFinite(quantity) && quantity >= 0 ? Math.floor(quantity) : 0;
+  let lastError: string | null = null;
 
   for (const tableName of tableAliases.inventory) {
     for (const companyField of companyFieldAliases) {
       for (const productField of productFieldAliases) {
-        const response = await supabaseAdmin
-          .from(tableName)
-          .update({ quantity: normalizedQuantity, updated_at: new Date().toISOString() })
-          .eq(companyField, companyId)
-          .eq(productField, productId)
-          .select('*')
-          .single();
+        const payloadCandidates: Array<Record<string, unknown>> = [
+          { quantity: normalizedQuantity },
+          { quantity: normalizedQuantity, updated_at: new Date().toISOString() },
+          { quantity: normalizedQuantity, updatedAt: new Date().toISOString() }
+        ];
 
-        if (!response.error && response.data) {
-          return response;
+        for (const payload of payloadCandidates) {
+          const response = await supabaseAdmin
+            .from(tableName)
+            .update(payload)
+            .eq(companyField, companyId)
+            .eq(productField, productId)
+            .select('*')
+            .single();
+
+          if (!response.error && response.data) {
+            return response;
+          }
+
+          if (!lastError) {
+            lastError = `${tableName}: ${response.error?.message || 'erro ao atualizar estoque'}`;
+          }
         }
       }
     }
   }
 
-  return createInventoryRecordWithAliases(productId, companyId, normalizedQuantity);
+  const created = await createInventoryRecordWithAliases(productId, companyId, normalizedQuantity);
+
+  if (!created.error) {
+    return created;
+  }
+
+  return {
+    data: null,
+    error: {
+      message: [lastError, created.error.message].filter(Boolean).join(' | ') || 'Falha ao atualizar estoque.'
+    }
+  };
 };
 
 const deleteProductByIdWithAliases = async (productId: string, companyId: string) => {
@@ -1308,7 +1352,8 @@ router.post('/products', requireAuth, async (req, res) => {
           if (inventoryCreated.error) {
             await deleteProductByIdWithAliases(createdProductId, companyId);
             return res.status(500).json({
-              message: 'Falha ao vincular produto ao estoque. Operacao revertida para manter consistencia.'
+              message: 'Falha ao vincular produto ao estoque. Operacao revertida para manter consistencia.',
+              detail: inventoryCreated.error.message
             });
           }
         }
