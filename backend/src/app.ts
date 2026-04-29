@@ -82,8 +82,8 @@ app.use(compression({ threshold: 1024 }));
 app.use(express.json({ limit: '60kb', strict: true }));
 app.use(express.urlencoded({ extended: false, limit: '60kb' }));
 app.use(globalRateLimit);
-app.use(blockSuspiciousRequests);
-app.use(sanitizeInput);
+app.use('/api', blockSuspiciousRequests);
+app.use('/api', sanitizeInput);
 app.use(requestAuditLogger);
 
 if (canServeFrontend) {
