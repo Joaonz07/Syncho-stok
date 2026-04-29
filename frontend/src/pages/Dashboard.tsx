@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DragEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
@@ -35,8 +35,6 @@ import {
   ChevronRight,
   Sparkles,
   Activity,
-  ArrowUpRight,
-  ArrowDownRight,
   Lightbulb,
   AlertTriangle,
   Award,
@@ -59,8 +57,6 @@ import InventoryERPWorkspace from '../components/modules/InventoryERPWorkspace';
 import TasksKanbanWorkspace from '../components/modules/TasksKanbanWorkspace';
 import RootAdminWorkspace from '../components/admin/RootAdminWorkspace';
 import SettingsWorkspace from '../components/settings/SettingsWorkspace';
-
-const AnalyticsCharts = lazy(() => import('../components/charts/AnalyticsCharts'));
 
 type LeadStatus =
   | 'NOVO_CONTATO'
@@ -135,6 +131,7 @@ type AdminUserMutationPayload = {
 type Product = {
   id: string;
   name: string;
+  status?: 'ACTIVE' | 'INACTIVE' | string;
   code?: string;
   sku?: string;
   barcode?: string;
@@ -202,6 +199,50 @@ type SalesAnalysis = {
     amountReceived: number;
     changeGiven: number;
   }>;
+  productProfitability?: Array<{
+    productId: string;
+    name: string;
+    soldQty: number;
+    revenue: number;
+    estimatedCost: number;
+    profit: number;
+    marginPercent: number;
+  }>;
+  productsWithoutSales?: Array<{
+    productId: string;
+    name: string;
+    quantity: number;
+    price: number;
+  }>;
+  customerMetrics?: Array<{
+    name: string;
+    purchases: number;
+    totalSpent: number;
+    averageTicket: number;
+    lastPurchaseAt: string | null;
+  }>;
+  inactiveCustomers?: Array<{
+    name: string;
+    purchases: number;
+    totalSpent: number;
+    averageTicket: number;
+    lastPurchaseAt: string | null;
+  }>;
+  salesByWeekday?: Array<{
+    day: string;
+    salesCount: number;
+    total: number;
+  }>;
+  salesByHour?: Array<{
+    hour: number;
+    salesCount: number;
+    total: number;
+  }>;
+  salesTrend?: {
+    currentWeekRevenue: number;
+    previousWeekRevenue: number;
+    trendPercent: number;
+  };
   lowStockProducts: Array<{
     id: string;
     name: string;
@@ -872,8 +913,7 @@ const Dashboard = () => {
   const [editingProductSku, setEditingProductSku] = useState('');
   const [editingProductBarcode, setEditingProductBarcode] = useState('');
   const [editingProductCategory, setEditingProductCategory] = useState('Sem categoria');
-  const [editingProductEnabledInInventory, setEditingProductEnabledInInventory] = useState(true);
-  const [editingProductEnabledInPDV, setEditingProductEnabledInPDV] = useState(true);
+  const [editingProductStatus, setEditingProductStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
   const [editingProductDescription, setEditingProductDescription] = useState('');
   const [integrationCompanyId, setIntegrationCompanyId] = useState('');
   const [integrationLoading, setIntegrationLoading] = useState(false);
@@ -1709,72 +1749,164 @@ const Dashboard = () => {
     [salesAnalysis, enabledTotals.totalSales, growthPercent, salesDropPercent, role, managedUsers, leads.length, leadsDropPercent]
   );
 
-  const sourcePieData = useMemo(
-    () =>
-      sourceShareData.map((item) => ({
-        name: item.source,
-        value: Number(item.leads || 0)
-      })),
-    [sourceShareData]
-  );
+  const analyticsLeadFunnel = useMemo(() => {
+    const totalLeads = leads.length;
+    const stageCounts = salesStages.map((stage) => {
+      const count = leads.filter((lead) => lead.status === stage.key).length;
+      return {
+        key: stage.key,
+        label: stage.label,
+        shortLabel: stage.shortLabel,
+        count,
+        sharePercent: totalLeads > 0 ? (count / totalLeads) * 100 : 0
+      };
+    });
 
-  const sellerPerformanceData = useMemo(
-    () =>
-      funnelSellersAnalytics
-        .slice(0, 4)
-        .map((seller) => ({
-          name: String(seller.name || 'Vendedor').slice(0, 14),
-          valor: Number(seller.salesVolume || 0)
-        })),
-    [funnelSellersAnalytics]
-  );
+    const closed = stageCounts.find((stage) => stage.key === 'FECHAMENTO')?.count || 0;
+    const overallConversion = totalLeads > 0 ? (closed / totalLeads) * 100 : 0;
 
-  const analyticsTopProducts = useMemo(() => {
-    const map: Record<string, { name: string; revenue: number; qty: number }> = {};
-    for (const sale of salesAnalysis?.recentSales || []) {
-      const key = String(sale.userId || 'other');
-      if (!map[key]) map[key] = { name: key.slice(0, 12), revenue: 0, qty: 0 };
-      map[key].revenue += Number(sale.total || 0);
-      map[key].qty += 1;
-    }
-    const productMap: Record<string, { name: string; revenue: number }> = {};
-    for (const p of products) {
-      const rev = Number(p.price || 0) * Number(p.quantity || 0);
-      productMap[p.id] = { name: String(p.name || '').slice(0, 16), revenue: rev };
-    }
-    return Object.values(productMap)
-      .filter((p) => p.revenue > 0)
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 6)
-      .map((p) => ({ name: p.name, valor: p.revenue }));
-  }, [salesAnalysis, products]);
+    return {
+      totalLeads,
+      closed,
+      overallConversion,
+      stages: stageCounts.map((stage, index) => {
+        const previous = index > 0 ? stageCounts[index - 1].count : totalLeads;
+        const stageConversion = previous > 0 ? (stage.count / previous) * 100 : 0;
+
+        return {
+          ...stage,
+          stageConversion
+        };
+      })
+    };
+  }, [leads]);
+
+  const profitabilityAnalytics = useMemo(() => {
+    const rows = salesAnalysis?.productProfitability || [];
+    const totalProfit = rows.reduce((sum, item) => sum + Number(item.profit || 0), 0);
+    const totalRevenue = rows.reduce((sum, item) => sum + Number(item.revenue || 0), 0);
+    const marginPercent = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+
+    return {
+      rows,
+      totalProfit,
+      totalRevenue,
+      marginPercent,
+      topProduct: rows[0] || null
+    };
+  }, [salesAnalysis]);
+
+  const customerAnalytics = useMemo(() => {
+    const allCustomers = (salesAnalysis?.customerMetrics || []).filter((customer) => customer.name !== 'Venda rapida');
+    const recurring = allCustomers.filter((customer) => Number(customer.purchases || 0) > 1);
+    const newcomers = allCustomers.filter((customer) => Number(customer.purchases || 0) <= 1);
+    const inactive = salesAnalysis?.inactiveCustomers || [];
+    const totalPurchases = allCustomers.reduce((sum, customer) => sum + Number(customer.purchases || 0), 0);
+    const recurringRate = allCustomers.length > 0 ? (recurring.length / allCustomers.length) * 100 : 0;
+
+    return {
+      allCustomers,
+      recurringCount: recurring.length,
+      newcomersCount: newcomers.length,
+      inactiveCount: inactive.length,
+      recurringRate,
+      averageFrequency: allCustomers.length > 0 ? totalPurchases / allCustomers.length : 0,
+      topCustomers: [...allCustomers].sort((left, right) => Number(right.totalSpent || 0) - Number(left.totalSpent || 0)).slice(0, 5)
+    };
+  }, [salesAnalysis]);
+
+  const performanceAnalytics = useMemo(() => {
+    const weekdayRows = salesAnalysis?.salesByWeekday || [];
+    const hourRows = salesAnalysis?.salesByHour || [];
+    const bestDay = [...weekdayRows].sort((left, right) => Number(right.total || 0) - Number(left.total || 0))[0] || null;
+    const bestHour = [...hourRows].sort((left, right) => Number(right.total || 0) - Number(left.total || 0))[0] || null;
+    const trendPercent = Number(salesAnalysis?.salesTrend?.trendPercent ?? growthPercent);
+
+    return {
+      weekdayRows,
+      hourRows,
+      bestDay,
+      bestHour,
+      trendPercent,
+      currentWeekRevenue: Number(salesAnalysis?.salesTrend?.currentWeekRevenue || 0),
+      previousWeekRevenue: Number(salesAnalysis?.salesTrend?.previousWeekRevenue || 0)
+    };
+  }, [growthPercent, salesAnalysis]);
+
+  const inventoryAnalytics = useMemo(() => {
+    const lowStock = salesAnalysis?.lowStockProducts || [];
+    const noSales = salesAnalysis?.productsWithoutSales || [];
+    const stagnant = noSales
+      .filter((product) => Number(product.quantity || 0) > 0)
+      .sort((left, right) => Number(right.quantity || 0) - Number(left.quantity || 0));
+    const stockHealthPercent = products.length > 0
+      ? Math.max(0, ((products.length - lowStock.length) / products.length) * 100)
+      : 100;
+
+    return {
+      lowStock,
+      noSales,
+      stagnant,
+      stockHealthPercent
+    };
+  }, [products.length, salesAnalysis]);
+
+  const executiveSnapshot = useMemo(() => {
+    const totalRevenue = Number(salesAnalysis?.totalRevenue || 0);
+    const totalSales = Number(salesAnalysis?.totalSales || 0);
+    const averageTicket = Number(salesAnalysis?.averageTicket || 0);
+    const profit = Number(profitabilityAnalytics.totalProfit || 0);
+    const marginPercent = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
+
+    return {
+      totalRevenue,
+      totalSales,
+      averageTicket,
+      profit,
+      marginPercent,
+      conversionPercent: Number(analyticsLeadFunnel.overallConversion || 0),
+      recurringRate: Number(customerAnalytics.recurringRate || 0),
+      trendPercent: Number(performanceAnalytics.trendPercent || 0)
+    };
+  }, [analyticsLeadFunnel.overallConversion, customerAnalytics.recurringRate, performanceAnalytics.trendPercent, profitabilityAnalytics.totalProfit, salesAnalysis]);
 
   const aiInsights = useMemo(() => {
     const insights: Array<{ icon: 'up' | 'warn' | 'award'; text: string }> = [];
-    if (growthPercent > 0) {
-      insights.push({ icon: 'up', text: `Vendas cresceram ${growthPercent.toFixed(1)}% em relação ao mês anterior.` });
-    } else if (growthPercent < 0) {
-      insights.push({ icon: 'warn', text: `Queda de ${Math.abs(growthPercent).toFixed(1)}% nas vendas. Revise sua estratégia.` });
+
+    if (executiveSnapshot.trendPercent >= 8) {
+      insights.push({ icon: 'up', text: `Tendência forte: receita da semana está ${executiveSnapshot.trendPercent.toFixed(1)}% acima da anterior.` });
     }
-    const lowStock = (salesAnalysis?.lowStockProducts || []).filter((p) => Number(p.quantity) <= 5);
-    for (const p of lowStock.slice(0, 2)) {
-      insights.push({ icon: 'warn', text: `Estoque crítico: "${p.name}" com apenas ${p.quantity} unidades.` });
+
+    if (executiveSnapshot.trendPercent <= -5) {
+      insights.push({ icon: 'warn', text: `Alerta de queda: variação semanal em ${executiveSnapshot.trendPercent.toFixed(1)}%. Reavalie oferta e abordagem comercial.` });
     }
-    if (sellerPerformanceData.length > 0) {
-      const top = sellerPerformanceData[0];
-      insights.push({ icon: 'award', text: `Melhor vendedor atual: ${top.name} com ${formatCurrency(Number(top.valor || 0))} em vendas.` });
+
+    if (inventoryAnalytics.lowStock.length > 0) {
+      const critical = inventoryAnalytics.lowStock[0];
+      insights.push({ icon: 'warn', text: `Risco de ruptura: "${critical.name}" com ${critical.quantity} unidade(s) em estoque.` });
     }
-    if (products.length > 0) {
-      const topProduct = [...products].sort((a, b) => Number(b.price || 0) * Number(b.quantity || 0) - Number(a.price || 0) * Number(a.quantity || 0))[0];
-      if (topProduct) {
-        insights.push({ icon: 'up', text: `Produto em destaque: "${topProduct.name}" com maior valor em estoque.` });
-      }
+
+    if (inventoryAnalytics.noSales.length > 0) {
+      insights.push({ icon: 'warn', text: `${inventoryAnalytics.noSales.length} produto(s) ainda sem venda no período analisado.` });
     }
+
+    if (profitabilityAnalytics.topProduct) {
+      insights.push({
+        icon: 'award',
+        text: `Maior lucro atual: ${profitabilityAnalytics.topProduct.name} com ${formatCurrency(Number(profitabilityAnalytics.topProduct.profit || 0))}.`
+      });
+    }
+
+    if (customerAnalytics.inactiveCount > 0) {
+      insights.push({ icon: 'warn', text: `${customerAnalytics.inactiveCount} cliente(s) inativo(s) há mais de 30 dias.` });
+    }
+
     if (insights.length === 0) {
-      insights.push({ icon: 'up', text: 'Adicione vendas e estoque para receber análises personalizadas.' });
+      insights.push({ icon: 'up', text: 'Base consistente: sem alertas críticos no período atual.' });
     }
-    return insights.slice(0, 4);
-  }, [growthPercent, salesAnalysis, sellerPerformanceData, products]);
+
+    return insights.slice(0, 6);
+  }, [customerAnalytics.inactiveCount, executiveSnapshot.trendPercent, formatCurrency, inventoryAnalytics.lowStock, inventoryAnalytics.noSales.length, profitabilityAnalytics.topProduct]);
 
   const adminPlanPriceMap = useMemo(() => {
     return planCatalog.reduce<Record<string, number>>((acc, plan) => {
@@ -3862,7 +3994,20 @@ const Dashboard = () => {
   };
 
   const openProductEditor = (product: Product) => {
-    setEditingProductId(product.id);
+    const normalizedProductId = String(product.id || '').trim();
+
+    if (!normalizedProductId) {
+      setStatus('Produto selecionado invalido para edicao.');
+      return;
+    }
+
+    const normalizedStatusRaw = String(product.status || '').trim().toUpperCase();
+    const normalizedStatus = normalizedStatusRaw === 'INACTIVE'
+      || (product.enabledInInventory === false && product.enabledInPDV === false)
+      ? 'INACTIVE'
+      : 'ACTIVE';
+
+    setEditingProductId(normalizedProductId);
     setEditingProductName(String(product.name || ''));
     setEditingProductPrice(String(Number(product.price || 0)));
     setEditingProductCost(String(Number(product.cost ?? product.price ?? 0)));
@@ -3870,9 +4015,26 @@ const Dashboard = () => {
     setEditingProductSku(String(product.sku || ''));
     setEditingProductBarcode(String(product.barcode || ''));
     setEditingProductCategory(String(product.category || 'Sem categoria'));
-    setEditingProductEnabledInInventory(product.enabledInInventory !== false);
-    setEditingProductEnabledInPDV(product.enabledInPDV !== false);
+    setEditingProductStatus(normalizedStatus);
     setEditingProductDescription(String(product.description || ''));
+  };
+
+  const openProductEditorById = (targetProductId: string) => {
+    const normalizedProductId = String(targetProductId || '').trim();
+
+    if (!normalizedProductId) {
+      setStatus('Produto selecionado invalido para edicao.');
+      return;
+    }
+
+    const targetProduct = products.find((item) => String(item.id || '').trim() === normalizedProductId);
+
+    if (!targetProduct) {
+      setStatus('Nao foi possivel carregar os dados do produto para edicao.');
+      return;
+    }
+
+    openProductEditor(targetProduct);
   };
 
   const cancelProductEditor = () => {
@@ -3884,8 +4046,7 @@ const Dashboard = () => {
     setEditingProductSku('');
     setEditingProductBarcode('');
     setEditingProductCategory('Sem categoria');
-    setEditingProductEnabledInInventory(true);
-    setEditingProductEnabledInPDV(true);
+    setEditingProductStatus('ACTIVE');
     setEditingProductDescription('');
   };
 
@@ -3908,6 +4069,8 @@ const Dashboard = () => {
     const normalizedBarcode = String(editingProductBarcode || '').trim();
     const normalizedCode = String(editingProductCode || normalizedSku || normalizedBarcode).trim();
     const normalizedCost = Number(editingProductCost || editingProductPrice || 0);
+    const normalizedStatus = editingProductStatus === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const enabledByStatus = normalizedStatus !== 'INACTIVE';
 
     try {
       const response = await fetch(`/api/dashboard/products/${editingProductId}`, {
@@ -3919,8 +4082,15 @@ const Dashboard = () => {
         body: JSON.stringify({
           name: editingProductName.trim(),
           code: normalizedCode,
+          sku: normalizedSku,
+          barcode: normalizedBarcode,
+          category: normalizedCategory,
+          cost: Number.isFinite(normalizedCost) ? normalizedCost : Number(editingProductPrice || 0),
           price: Number(editingProductPrice || 0),
           description: editingProductDescription.trim(),
+          status: normalizedStatus,
+          enabledInInventory: enabledByStatus,
+          enabledInPDV: enabledByStatus,
           companyId: targetCompanyId
         })
       });
@@ -3947,9 +4117,50 @@ const Dashboard = () => {
         description: editingProductDescription.trim(),
         quantity: Math.max(0, Math.floor(Number(existingShared?.quantity || 0))),
         companyId: sharedCompanyId,
-        enabledInInventory: editingProductEnabledInInventory,
-        enabledInPDV: editingProductEnabledInPDV,
+        enabledInInventory: enabledByStatus,
+        enabledInPDV: enabledByStatus,
       };
+
+      const updatedProductFromResponse = (result?.product || {}) as Record<string, unknown>;
+      const localUpdatedProduct: Product = {
+        id: String(editingProductId || '').trim(),
+        name: editingProductName.trim(),
+        price: Number(editingProductPrice || 0),
+        cost: Number.isFinite(normalizedCost) ? normalizedCost : Number(editingProductPrice || 0),
+        code: normalizedCode,
+        sku: normalizedSku,
+        barcode: normalizedBarcode,
+        category: normalizedCategory,
+        description: editingProductDescription.trim(),
+        status: normalizedStatus,
+        enabledInInventory: enabledByStatus,
+        enabledInPDV: enabledByStatus,
+        quantity: Number(existingShared?.quantity || 0),
+        company_id: sharedCompanyId
+      };
+
+      const mergedUpdatedProduct = mergeProductsWithSharedMeta([
+        {
+          ...localUpdatedProduct,
+          ...(updatedProductFromResponse as Product),
+          id: String(updatedProductFromResponse.id || localUpdatedProduct.id).trim() || localUpdatedProduct.id,
+          quantity: Number(updatedProductFromResponse.quantity ?? localUpdatedProduct.quantity ?? 0)
+        }
+      ])[0];
+
+      setProducts((previous) => previous.map((item) => {
+        const currentId = String(item.id || '').trim();
+
+        if (currentId !== String(editingProductId || '').trim()) {
+          return item;
+        }
+
+        return {
+          ...item,
+          ...mergedUpdatedProduct
+        };
+      }));
+
       writeSharedProducts([
         ...sharedCurrent.filter((item) => String(item.id || '').trim() !== String(editingProductId || '').trim()),
         mergedShared,
@@ -3959,7 +4170,7 @@ const Dashboard = () => {
       cancelProductEditor();
       setStatus('Produto atualizado com sucesso.');
       showToast('Produto atualizado');
-      await fetchProducts();
+      void fetchProducts();
     } catch (_error) {
       setStatus('Erro de rede ao atualizar produto.');
     } finally {
@@ -5726,14 +5937,14 @@ const Dashboard = () => {
                     <input className={themedInputClass} value={editingProductSku} onChange={(event) => setEditingProductSku(event.target.value)} placeholder="SKU" />
                     <input className={themedInputClass} value={editingProductBarcode} onChange={(event) => setEditingProductBarcode(event.target.value)} placeholder="Código de barras" />
                     <input className={themedInputClass} value={editingProductCode} onChange={(event) => setEditingProductCode(event.target.value)} placeholder="Código interno" />
-                    <label className={['flex items-center gap-2 rounded-xl border px-3 py-2 text-sm', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-700'].join(' ')}>
-                      <input type="checkbox" checked={editingProductEnabledInInventory} onChange={(event) => setEditingProductEnabledInInventory(event.target.checked)} />
-                      Disponível no Estoque
-                    </label>
-                    <label className={['flex items-center gap-2 rounded-xl border px-3 py-2 text-sm', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-700'].join(' ')}>
-                      <input type="checkbox" checked={editingProductEnabledInPDV} onChange={(event) => setEditingProductEnabledInPDV(event.target.checked)} />
-                      Disponível no PDV
-                    </label>
+                    <select
+                      className={themedSelectClass}
+                      value={editingProductStatus}
+                      onChange={(event) => setEditingProductStatus(event.target.value === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE')}
+                    >
+                      <option value="ACTIVE">Status: Ativo</option>
+                      <option value="INACTIVE">Status: Inativo</option>
+                    </select>
                     <textarea className={themedInputClass + ' md:col-span-2 xl:col-span-3'} value={editingProductDescription} onChange={(event) => setEditingProductDescription(event.target.value)} rows={3} />
                   </div>
                   <div className="mt-4 flex gap-2">
@@ -5764,7 +5975,7 @@ const Dashboard = () => {
                         <p className={['mt-1 text-sm', themedSubtextClass].join(' ')}>{String(product.description || 'Sem descricao cadastrada.')}</p>
                       </div>
                       <div className="flex gap-2">
-                        <button type="button" onClick={() => openProductEditor(product)} className={isDarkTheme ? 'rounded-xl border border-white/20 px-3 py-2 text-sm font-semibold text-slate-100 transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/10' : 'rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-100'}>Editar</button>
+                        <button type="button" onClick={() => openProductEditorById(String(product.id || ''))} className={isDarkTheme ? 'rounded-xl border border-white/20 px-3 py-2 text-sm font-semibold text-slate-100 transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/10' : 'rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-100'}>Editar</button>
                         <button type="button" onClick={() => void deleteProduct(product.id)} className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-rose-500">Excluir</button>
                       </div>
                     </div>
@@ -6883,227 +7094,300 @@ const Dashboard = () => {
           {/* ── VIEW: ANALYTICS ── */}
           {activeView === 'analytics' ? (
             <div className="grid gap-6 pb-8">
-              {/* Header */}
               <motion.div
                 initial={{ opacity: 0, y: -16 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="flex flex-col gap-1"
+                transition={{ duration: 0.38, ease: 'easeOut' }}
+                className={[
+                  'rounded-3xl border p-6 md:p-7',
+                  isDarkTheme
+                    ? 'border-cyan-400/20 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/40'
+                    : 'border-cyan-200 bg-gradient-to-br from-white via-cyan-50 to-emerald-50'
+                ].join(' ')}
               >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/30">
-                    <Activity className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <h1 className={['text-2xl font-black tracking-tight', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>
-                      Dashboard de Análise
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <h1 className={['text-2xl font-black tracking-tight', isDarkTheme ? 'text-cyan-100' : 'text-slate-900'].join(' ')}>
+                      Análise Estratégica SYNCHO CRM
                     </h1>
-                    <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                      Visão premium dos seus indicadores de negócio
+                    <p className={['text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>
+                      Decisões guiadas por funil, lucro real, comportamento de clientes e inteligência de estoque.
+                    </p>
+                  </div>
+                  <div className={['rounded-xl border px-4 py-2 text-right', isDarkTheme ? 'border-cyan-400/25 bg-cyan-500/10' : 'border-cyan-200 bg-cyan-100/70'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-cyan-200/80' : 'text-cyan-700'].join(' ')}>Trend semanal</p>
+                    <p className={['text-xl font-black', performanceAnalytics.trendPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'].join(' ')}>
+                      {performanceAnalytics.trendPercent >= 0 ? '+' : ''}{performanceAnalytics.trendPercent.toFixed(1)}%
                     </p>
                   </div>
                 </div>
               </motion.div>
 
-              {/* KPI Cards */}
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                {[
-                  {
-                    label: 'Receita Total',
-                    value: formatCurrency(Number(salesAnalysis?.totalRevenue || 0)),
-                    variation: growthPercent,
-                    icon: DollarSign,
-                    gradient: 'from-blue-600 to-cyan-500',
-                    glow: 'shadow-blue-500/25',
-                    border: isDarkTheme ? 'border-blue-500/20' : 'border-blue-200',
-                    neon: 'rgba(59,130,246,0.24)'
-                  },
-                  {
-                    label: 'Crescimento',
-                    value: `${growthPercent >= 0 ? '+' : ''}${growthPercent.toFixed(1)}%`,
-                    variation: growthPercent,
-                    icon: TrendingUp,
-                    gradient: 'from-purple-600 to-pink-500',
-                    glow: 'shadow-purple-500/25',
-                    border: isDarkTheme ? 'border-purple-500/20' : 'border-purple-200',
-                    neon: 'rgba(168,85,247,0.24)'
-                  },
-                  {
-                    label: 'Total de Vendas',
-                    value: String(salesAnalysis?.totalSales || 0),
-                    variation: 0,
-                    icon: ShoppingCart,
-                    gradient: 'from-emerald-600 to-teal-500',
-                    glow: 'shadow-emerald-500/25',
-                    border: isDarkTheme ? 'border-emerald-500/20' : 'border-emerald-200',
-                    neon: 'rgba(16,185,129,0.22)'
-                  },
-                  {
-                    label: 'Clientes',
-                    value: String(role === 'ADMIN' ? managedUsers.filter((u) => u.role === 'CLIENT').length : leads.length),
-                    variation: 0,
-                    icon: Users,
-                    gradient: 'from-orange-500 to-rose-500',
-                    glow: 'shadow-orange-500/25',
-                    border: isDarkTheme ? 'border-orange-500/20' : 'border-orange-200',
-                    neon: 'rgba(251,146,60,0.22)'
-                  }
-                ].map((card, idx) => {
-                  const Icon = card.icon;
-                  const isPositive = card.variation >= 0;
-                  return (
-                    <motion.div
-                      key={card.label}
-                      initial={{ opacity: 0, y: 24 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.4, delay: idx * 0.08, ease: 'easeOut' }}
-                      whileHover={{ y: -4, scale: 1.02 }}
-                      className={[
-                        'relative overflow-hidden rounded-2xl border p-5 shadow-xl transition-all duration-300',
-                        card.glow,
-                        isDarkTheme
-                          ? `bg-[#0d1117] ${card.border}`
-                          : `bg-white ${card.border}`
-                      ].join(' ')}
-                      style={
-                        isDarkTheme
-                          ? {
-                              boxShadow: `0 0 0 1px rgba(148,163,184,0.08), 0 0 20px ${card.neon}, 0 10px 30px rgba(2,6,23,0.45)`
-                            }
-                          : undefined
-                      }
-                    >
-                      {/* Glow blob */}
-                      <div className={['pointer-events-none absolute -right-4 -top-4 h-20 w-20 rounded-full bg-gradient-to-br opacity-20 blur-2xl', card.gradient].join(' ')} />
-                      <div className="relative flex items-start justify-between">
-                        <div className={['flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br shadow-lg', card.gradient, card.glow].join(' ')}>
-                          <Icon className="h-5 w-5 text-white" />
-                        </div>
-                        {card.variation !== 0 ? (
-                          <span className={[
-                            'flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-semibold',
-                            isPositive ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
-                          ].join(' ')}>
-                            {isPositive ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                            {Math.abs(card.variation).toFixed(1)}%
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="mt-4">
-                        <p className={['text-2xl font-black tracking-tight', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>{card.value}</p>
-                        <p className={['mt-1 text-xs font-medium', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>{card.label}</p>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-
-              <Suspense
-                fallback={
-                  <div className={['rounded-2xl border p-5 text-sm', isDarkTheme ? 'border-white/10 bg-[#0d1117] text-slate-400' : 'border-slate-200 bg-white text-slate-500'].join(' ')}>
-                    Carregando graficos da analise...
-                  </div>
-                }
-              >
-                <AnalyticsCharts
-                  isDarkTheme={isDarkTheme}
-                  monthlySalesSeries={monthlySalesSeries}
-                  sourcePieData={sourcePieData}
-                  analyticsTopProducts={analyticsTopProducts}
-                  sellerPerformanceData={sellerPerformanceData}
-                  formatCurrency={formatCurrency}
-                />
-              </Suspense>
-
-              {/* AI Insights Card */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
+              <motion.section
+                initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.45 }}
-                className={[
-                  'rounded-2xl border p-5 shadow-xl',
-                  isDarkTheme ? 'border-yellow-500/20 bg-[#0d1117] shadow-[0_0_20px_rgba(234,179,8,0.14)]' : 'border-yellow-200 bg-white'
-                ].join(' ')}
+                transition={{ duration: 0.35, delay: 0.05 }}
+                className={['rounded-2xl border p-5', isDarkTheme ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white'].join(' ')}
               >
-                <div className="mb-4 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-yellow-500 to-orange-500 shadow-lg shadow-yellow-500/30">
-                    <Sparkles className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>Insights de IA</h3>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Análises automáticas do seu negócio</p>
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {aiInsights.map((insight, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, x: -12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.35, delay: 0.5 + idx * 0.07 }}
-                      className={[
-                        'flex items-start gap-3 rounded-xl p-3.5',
-                        insight.icon === 'warn'
-                          ? isDarkTheme ? 'bg-rose-500/10 border border-rose-500/20' : 'bg-rose-50 border border-rose-200'
-                          : insight.icon === 'award'
-                            ? isDarkTheme ? 'bg-yellow-500/10 border border-yellow-500/20' : 'bg-yellow-50 border border-yellow-200'
-                            : isDarkTheme ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-emerald-50 border border-emerald-200'
-                      ].join(' ')}
-                    >
-                      <div className={[
-                        'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg',
-                        insight.icon === 'warn'
-                          ? 'bg-rose-500/20 text-rose-400'
-                          : insight.icon === 'award'
-                            ? 'bg-yellow-500/20 text-yellow-400'
-                            : 'bg-emerald-500/20 text-emerald-400'
-                      ].join(' ')}>
-                        {insight.icon === 'warn' ? <AlertTriangle className="h-3.5 w-3.5" /> : insight.icon === 'award' ? <Award className="h-3.5 w-3.5" /> : <Lightbulb className="h-3.5 w-3.5" />}
+                <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>1. Visão executiva</h3>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  {[
+                    { label: 'Receita total', value: formatCurrency(executiveSnapshot.totalRevenue), icon: DollarSign },
+                    { label: 'Lucro real', value: formatCurrency(executiveSnapshot.profit), icon: TrendingUp },
+                    { label: 'Ticket médio', value: formatCurrency(executiveSnapshot.averageTicket), icon: ShoppingCart },
+                    { label: 'Conversão do funil', value: `${executiveSnapshot.conversionPercent.toFixed(1)}%`, icon: Users }
+                  ].map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <div key={item.label} className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                        <div className="mb-2 flex items-center gap-2">
+                          <Icon className={['h-4 w-4', isDarkTheme ? 'text-cyan-300' : 'text-cyan-700'].join(' ')} />
+                          <span className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{item.label}</span>
+                        </div>
+                        <p className={['text-lg font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{item.value}</p>
                       </div>
-                      <p className={['text-sm leading-snug', isDarkTheme ? 'text-slate-300' : 'text-slate-700'].join(' ')}>{insight.text}</p>
-                    </motion.div>
+                    );
+                  })}
+                </div>
+              </motion.section>
+
+              <motion.section
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.08 }}
+                className={['rounded-2xl border p-5', isDarkTheme ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white'].join(' ')}
+              >
+                <div className="mb-4 flex items-center justify-between gap-4">
+                  <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>2. Funil comercial</h3>
+                  <span className={['rounded-full px-3 py-1 text-xs font-semibold', isDarkTheme ? 'bg-cyan-500/20 text-cyan-200' : 'bg-cyan-100 text-cyan-700'].join(' ')}>
+                    {analyticsLeadFunnel.closed}/{analyticsLeadFunnel.totalLeads} fechados
+                  </span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-5">
+                  {analyticsLeadFunnel.stages.map((stage) => (
+                    <div key={stage.key} className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{stage.shortLabel}</p>
+                      <p className={['mt-1 text-xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{stage.count}</p>
+                      <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                        {stage.stageConversion.toFixed(1)}% da etapa anterior
+                      </p>
+                      <div className={['mt-3 h-2 rounded-full', isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'].join(' ')}>
+                        <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500" style={{ width: `${Math.min(100, Math.max(4, stage.sharePercent))}%` }} />
+                      </div>
+                    </div>
                   ))}
                 </div>
-              </motion.div>
+              </motion.section>
 
-              {/* Sales table summary */}
-              {(salesAnalysis?.recentSales?.length ?? 0) > 0 ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
+              <div className="grid gap-6 lg:grid-cols-2">
+                <motion.section
+                  initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.5 }}
-                  className={[
-                    'rounded-2xl border p-5 shadow-xl',
-                    isDarkTheme ? 'border-white/10 bg-[#0d1117] shadow-[0_0_16px_rgba(148,163,184,0.1)]' : 'border-slate-200 bg-white'
-                  ].join(' ')}
+                  transition={{ duration: 0.35, delay: 0.11 }}
+                  className={['rounded-2xl border p-5', isDarkTheme ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white'].join(' ')}
                 >
-                  <h3 className={['mb-4 text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>Vendas Recentes</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className={isDarkTheme ? 'border-b border-white/10' : 'border-b border-slate-100'}>
-                          <th className={['py-2 text-left text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>ID</th>
-                          <th className={['py-2 text-left text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Data</th>
-                          <th className={['py-2 text-right text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-500' : 'text-slate-400'].join(' ')}>Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(salesAnalysis?.recentSales || []).slice(0, 8).map((sale) => (
-                          <tr key={sale.id} className={isDarkTheme ? 'border-b border-white/5 hover:bg-white/3' : 'border-b border-slate-50 hover:bg-slate-50'}>
-                            <td className={['py-2.5 font-mono text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{String(sale.id).slice(0, 8)}…</td>
-                            <td className={['py-2.5', isDarkTheme ? 'text-slate-400' : 'text-slate-600'].join(' ')}>
-                              {new Date(String(sale.createdAt || '')).toLocaleDateString('pt-BR')}
-                            </td>
-                            <td className={['py-2.5 text-right font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-blue-700'].join(' ')}>
-                              {formatCurrency(Number(sale.total || 0))}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>3. Performance de vendas</h3>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Melhor dia</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{performanceAnalytics.bestDay?.day || 'Sem dados'}</p>
+                    </div>
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Melhor horário</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{performanceAnalytics.bestHour ? `${String(performanceAnalytics.bestHour.hour).padStart(2, '0')}:00` : 'Sem dados'}</p>
+                    </div>
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Receita 7 dias</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{formatCurrency(performanceAnalytics.currentWeekRevenue)}</p>
+                    </div>
                   </div>
-                </motion.div>
-              ) : null}
+                  <div className="mt-4 space-y-2">
+                    {(performanceAnalytics.weekdayRows || []).map((day) => {
+                      const maxValue = Math.max(...(performanceAnalytics.weekdayRows || []).map((item) => Number(item.total || 0)), 1);
+                      const width = (Number(day.total || 0) / maxValue) * 100;
+                      return (
+                        <div key={day.day} className="space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className={isDarkTheme ? 'text-slate-300' : 'text-slate-600'}>{day.day}</span>
+                            <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>{formatCurrency(Number(day.total || 0))}</span>
+                          </div>
+                          <div className={['h-2 rounded-full', isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'].join(' ')}>
+                            <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-500" style={{ width: `${Math.max(4, width)}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.section>
+
+                <motion.section
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, delay: 0.14 }}
+                  className={['rounded-2xl border p-5', isDarkTheme ? 'border-amber-400/20 bg-slate-900/70' : 'border-amber-200 bg-white'].join(' ')}
+                >
+                  <div className="mb-4 flex items-center gap-3">
+                    <Sparkles className={['h-5 w-5', isDarkTheme ? 'text-amber-300' : 'text-amber-600'].join(' ')} />
+                    <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>4. Insights inteligentes</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {aiInsights.map((insight, idx) => (
+                      <div
+                        key={`${insight.text}-${idx}`}
+                        className={[
+                          'flex items-start gap-3 rounded-xl border p-3',
+                          insight.icon === 'warn'
+                            ? isDarkTheme ? 'border-rose-500/30 bg-rose-500/10' : 'border-rose-200 bg-rose-50'
+                            : insight.icon === 'award'
+                              ? isDarkTheme ? 'border-amber-500/30 bg-amber-500/10' : 'border-amber-200 bg-amber-50'
+                              : isDarkTheme ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'
+                        ].join(' ')}
+                      >
+                        <div className={[
+                          'mt-0.5 flex h-7 w-7 items-center justify-center rounded-lg',
+                          insight.icon === 'warn'
+                            ? 'bg-rose-500/20 text-rose-400'
+                            : insight.icon === 'award'
+                              ? 'bg-amber-500/20 text-amber-400'
+                              : 'bg-emerald-500/20 text-emerald-400'
+                        ].join(' ')}>
+                          {insight.icon === 'warn' ? <AlertTriangle className="h-3.5 w-3.5" /> : insight.icon === 'award' ? <Award className="h-3.5 w-3.5" /> : <Lightbulb className="h-3.5 w-3.5" />}
+                        </div>
+                        <p className={['text-sm leading-relaxed', isDarkTheme ? 'text-slate-200' : 'text-slate-700'].join(' ')}>{insight.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </motion.section>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <motion.section
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, delay: 0.17 }}
+                  className={['rounded-2xl border p-5', isDarkTheme ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white'].join(' ')}
+                >
+                  <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>5. Clientes</h3>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Novos</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{customerAnalytics.newcomersCount}</p>
+                    </div>
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Recorrentes</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{customerAnalytics.recurringCount}</p>
+                    </div>
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Inativos</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-rose-300' : 'text-rose-600'].join(' ')}>{customerAnalytics.inactiveCount}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-2">
+                    {customerAnalytics.topCustomers.length > 0 ? customerAnalytics.topCustomers.map((customer) => (
+                      <div key={customer.name} className={['flex items-center justify-between rounded-xl border px-3 py-2', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                        <div>
+                          <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{customer.name}</p>
+                          <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{customer.purchases} compra(s)</p>
+                        </div>
+                        <p className={['text-sm font-bold', isDarkTheme ? 'text-cyan-300' : 'text-cyan-700'].join(' ')}>{formatCurrency(Number(customer.totalSpent || 0))}</p>
+                      </div>
+                    )) : (
+                      <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Sem dados de clientes para o período.</p>
+                    )}
+                  </div>
+                </motion.section>
+
+                <motion.section
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, delay: 0.2 }}
+                  className={['rounded-2xl border p-5', isDarkTheme ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white'].join(' ')}
+                >
+                  <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>6. Estoque inteligente</h3>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Saúde do estoque</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-emerald-300' : 'text-emerald-700'].join(' ')}>{inventoryAnalytics.stockHealthPercent.toFixed(1)}%</p>
+                    </div>
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Sem venda</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{inventoryAnalytics.noSales.length}</p>
+                    </div>
+                    <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Risco de falta</p>
+                      <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-rose-300' : 'text-rose-600'].join(' ')}>{inventoryAnalytics.lowStock.length}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    {inventoryAnalytics.stagnant.slice(0, 5).map((product) => (
+                      <div key={product.productId} className={['flex items-center justify-between rounded-xl border px-3 py-2', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                        <div>
+                          <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{product.name}</p>
+                          <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Sem venda e {product.quantity} unidade(s)</p>
+                        </div>
+                        <span className={['rounded-full px-2 py-1 text-xs font-semibold', isDarkTheme ? 'bg-rose-500/20 text-rose-300' : 'bg-rose-100 text-rose-700'].join(' ')}>
+                          parado
+                        </span>
+                      </div>
+                    ))}
+                    {inventoryAnalytics.stagnant.length === 0 ? (
+                      <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Nenhum produto parado identificado.</p>
+                    ) : null}
+                  </div>
+                </motion.section>
+              </div>
+
+              <motion.section
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.23 }}
+                className={['rounded-2xl border p-5', isDarkTheme ? 'border-emerald-400/20 bg-slate-900/70' : 'border-emerald-200 bg-white'].join(' ')}
+              >
+                <h3 className={['text-base font-bold', isDarkTheme ? 'text-slate-100' : 'text-slate-900'].join(' ')}>7. Lucro real</h3>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Lucro acumulado</p>
+                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-emerald-300' : 'text-emerald-700'].join(' ')}>{formatCurrency(profitabilityAnalytics.totalProfit)}</p>
+                  </div>
+                  <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Receita base lucro</p>
+                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{formatCurrency(profitabilityAnalytics.totalRevenue)}</p>
+                  </div>
+                  <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Margem real</p>
+                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-300' : 'text-cyan-700'].join(' ')}>{profitabilityAnalytics.marginPercent.toFixed(1)}%</p>
+                  </div>
+                  <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Produto mais lucrativo</p>
+                    <p className={['mt-1 text-sm font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{profitabilityAnalytics.topProduct?.name || 'Sem dados'}</p>
+                  </div>
+                </div>
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className={isDarkTheme ? 'border-b border-white/10' : 'border-b border-slate-200'}>
+                        <th className={['py-2 text-left text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Produto</th>
+                        <th className={['py-2 text-right text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Qtd vendida</th>
+                        <th className={['py-2 text-right text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Lucro</th>
+                        <th className={['py-2 text-right text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Margem</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {profitabilityAnalytics.rows.slice(0, 8).map((item) => (
+                        <tr key={item.productId} className={isDarkTheme ? 'border-b border-white/5' : 'border-b border-slate-100'}>
+                          <td className={['py-2.5', isDarkTheme ? 'text-slate-200' : 'text-slate-700'].join(' ')}>{item.name}</td>
+                          <td className={['py-2.5 text-right', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{item.soldQty}</td>
+                          <td className={['py-2.5 text-right font-semibold', Number(item.profit || 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'].join(' ')}>{formatCurrency(Number(item.profit || 0))}</td>
+                          <td className={['py-2.5 text-right', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{Number(item.marginPercent || 0).toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {profitabilityAnalytics.rows.length === 0 ? (
+                    <p className={['mt-3 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Sem itens de venda suficientes para calcular lucro por produto.</p>
+                  ) : null}
+                </div>
+              </motion.section>
             </div>
           ) : null}
 

@@ -48,6 +48,7 @@ const salePaymentFieldAliases = ['payment_method', 'paymentMethod'];
 const saleAmountReceivedFieldAliases = ['amount_received', 'amountReceived'];
 const saleChangeDueFieldAliases = ['change_due', 'changeDue'];
 const saleCustomerNameFieldAliases = ['customer_name', 'customerName'];
+const saleIdFieldAliases = ['sale_id', 'saleId'];
 const leadStatuses = [
   'NOVO_CONTATO',
   'EM_CONTATO',
@@ -94,6 +95,13 @@ type IntegrationChatMessage = {
 type CheckoutItem = {
   productId: string;
   quantity: number;
+};
+
+type SaleItemRow = {
+  saleId: string;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
 };
 
 const checkoutPaymentMethods = ['cash', 'pix', 'card'] as const;
@@ -881,6 +889,56 @@ const listInventoryByCompanyWithAliases = async (companyId: string) => {
   };
 };
 
+const listSaleItemsBySalesWithAliases = async (saleIds: string[]) => {
+  if (!saleIds.length) {
+    return {
+      data: [] as SaleItemRow[],
+      error: null
+    };
+  }
+
+  let lastError: string | null = null;
+
+  for (const tableName of tableAliases.saleItems) {
+    for (const saleIdField of saleIdFieldAliases) {
+      const response = await supabaseAdmin
+        .from(tableName)
+        .select('*')
+        .in(saleIdField, saleIds);
+
+      if (!response.error) {
+        const normalized = ((response.data || []) as Array<Record<string, unknown>>).map((row) => {
+          const saleId = String(row.sale_id || row.saleId || '').trim();
+          const productId = String(row.product_id || row.productId || '').trim();
+          const quantity = Number(row.quantity || 0);
+          const unitPrice = Number(row.unit_price || row.unitPrice || 0);
+
+          return {
+            saleId,
+            productId,
+            quantity: Number.isFinite(quantity) ? quantity : 0,
+            unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0
+          };
+        });
+
+        return {
+          data: normalized,
+          error: null
+        };
+      }
+
+      if (!lastError) {
+        lastError = `${tableName}: ${response.error.message || 'falha ao listar itens de venda'}`;
+      }
+    }
+  }
+
+  return {
+    data: [] as SaleItemRow[],
+    error: lastError || 'Falha ao listar itens de venda.'
+  };
+};
+
 const createInventoryRecordWithAliases = async (productId: string, companyId: string, quantity = 0) => {
   const normalizedQuantity = Number.isFinite(quantity) && quantity >= 0 ? Math.floor(quantity) : 0;
   let lastError: string | null = null;
@@ -1479,9 +1537,17 @@ router.patch('/products/:id', requireAuth, async (req, res) => {
   const productId = String(req.params.id || '').trim();
   const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
   const name = String(req.body?.name || '').trim();
-  const code = String(req.body?.code || '').trim();
   const price = Number(req.body?.price || 0);
-  const description = String(req.body?.description || '').trim();
+  const code = String(req.body?.code ?? '').trim();
+  const sku = String(req.body?.sku ?? '').trim();
+  const barcode = String(req.body?.barcode ?? '').trim();
+  const category = String(req.body?.category ?? '').trim();
+  const description = String(req.body?.description ?? '').trim();
+  const status = String(req.body?.status ?? '').trim().toUpperCase();
+  const costRaw = req.body?.cost;
+  const cost = Number(costRaw ?? 0);
+  const enabledInInventory = req.body?.enabledInInventory;
+  const enabledInPDV = req.body?.enabledInPDV;
 
   if (!productId || !companyId) {
     return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
@@ -1491,17 +1557,72 @@ router.patch('/products/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'name e price sao obrigatorios.' });
   }
 
-  const payload: Record<string, unknown> = {
+  const basePayload: Record<string, unknown> = {
     name,
     price,
     description
   };
 
-  if (code) {
-    payload.code = code;
+  const extendedPayload: Record<string, unknown> = {
+    ...basePayload,
+    code,
+    sku,
+    barcode,
+    category,
+  };
+
+  if (Number.isFinite(cost)) {
+    extendedPayload.cost = cost;
   }
 
-  const response = await updateProductWithAliases(productId, companyId, payload);
+  if (status) {
+    extendedPayload.status = status;
+  }
+
+  if (typeof enabledInInventory === 'boolean') {
+    extendedPayload.enabledInInventory = enabledInInventory;
+    extendedPayload.enabled_in_inventory = enabledInInventory;
+  }
+
+  if (typeof enabledInPDV === 'boolean') {
+    extendedPayload.enabledInPDV = enabledInPDV;
+    extendedPayload.enabled_in_pdv = enabledInPDV;
+  }
+
+  const payloadCandidates: Array<Record<string, unknown>> = [
+    extendedPayload,
+    {
+      ...basePayload,
+      code,
+      sku,
+      barcode,
+      category,
+      ...(Number.isFinite(cost) ? { cost } : {}),
+      ...(status ? { status } : {})
+    },
+    {
+      ...basePayload,
+      code,
+      ...(Number.isFinite(cost) ? { cost } : {}),
+      ...(status ? { status } : {})
+    },
+    {
+      ...basePayload,
+      code,
+    },
+    basePayload
+  ];
+
+  let response = await updateProductWithAliases(productId, companyId, payloadCandidates[0]);
+
+  for (const payload of payloadCandidates.slice(1)) {
+    if (!response.error) {
+      break;
+    }
+
+    response = await updateProductWithAliases(productId, companyId, payload);
+
+  }
 
   if (!response.error) {
     void dispatchCompanyWebhookEvent(companyId, 'product.updated', {
@@ -2018,10 +2139,15 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
     companyId
   });
   const inventoryResponse = await listInventoryByCompanyWithAliases(companyId);
+  const saleIds = ((salesResponse.data || []) as Array<Record<string, unknown>>)
+    .map((sale) => String(sale.id || '').trim())
+    .filter(Boolean);
+  const saleItemsResponse = await listSaleItemsBySalesWithAliases(saleIds);
 
   const sales = (salesResponse.data || []) as Array<Record<string, unknown>>;
   const products = (productsResponse.data || []) as Array<Record<string, unknown>>;
   const inventoryRows = (inventoryResponse.data || []) as Array<Record<string, unknown>>;
+  const saleItems = saleItemsResponse.data || [];
 
   const quantityByProductId = new Map<string, number>();
 
@@ -2153,6 +2279,211 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
     };
   });
 
+  const productById = new Map<string, Record<string, unknown>>();
+
+  for (const product of products) {
+    const productId = String(product.id || '').trim();
+
+    if (!productId) {
+      continue;
+    }
+
+    productById.set(productId, product);
+  }
+
+  const saleById = new Map<string, Record<string, unknown>>();
+
+  for (const sale of sales) {
+    const saleId = String(sale.id || '').trim();
+
+    if (!saleId) {
+      continue;
+    }
+
+    saleById.set(saleId, sale);
+  }
+
+  const productPerformanceMap = new Map<string, {
+    productId: string;
+    name: string;
+    soldQty: number;
+    revenue: number;
+    estimatedCost: number;
+    profit: number;
+  }>();
+
+  for (const item of saleItems) {
+    if (!item.productId || !item.saleId) {
+      continue;
+    }
+
+    const product = productById.get(item.productId);
+    const unitCost = Number(product?.cost || 0);
+    const normalizedUnitCost = Number.isFinite(unitCost) ? unitCost : 0;
+    const quantity = Number.isFinite(item.quantity) ? item.quantity : 0;
+    const unitPrice = Number.isFinite(item.unitPrice) ? item.unitPrice : 0;
+    const revenue = unitPrice * quantity;
+    const estimatedCost = normalizedUnitCost * quantity;
+    const profit = revenue - estimatedCost;
+    const name = String(product?.name || 'Produto sem nome').trim() || 'Produto sem nome';
+
+    const current = productPerformanceMap.get(item.productId) || {
+      productId: item.productId,
+      name,
+      soldQty: 0,
+      revenue: 0,
+      estimatedCost: 0,
+      profit: 0
+    };
+
+    current.soldQty += quantity;
+    current.revenue += revenue;
+    current.estimatedCost += estimatedCost;
+    current.profit += profit;
+
+    productPerformanceMap.set(item.productId, current);
+  }
+
+  const productProfitability = Array.from(productPerformanceMap.values())
+    .map((entry) => ({
+      ...entry,
+      marginPercent: entry.revenue > 0 ? (entry.profit / entry.revenue) * 100 : 0
+    }))
+    .sort((left, right) => right.profit - left.profit);
+
+  const soldProductIds = new Set(productProfitability.map((item) => item.productId));
+  const productsWithoutSales = products
+    .filter((product) => {
+      const productId = String(product.id || '').trim();
+      return Boolean(productId) && !soldProductIds.has(productId);
+    })
+    .map((product) => ({
+      productId: String(product.id || ''),
+      name: String(product.name || 'Produto sem nome'),
+      quantity: Number(product.quantity || 0),
+      price: Number(product.price || 0)
+    }));
+
+  const customerMap = new Map<string, {
+    name: string;
+    purchases: number;
+    totalSpent: number;
+    lastPurchaseAt: string | null;
+  }>();
+
+  const weekdayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+  const weekdayMap = new Map<string, { day: string; salesCount: number; total: number }>();
+  const hourMap = new Map<number, { hour: number; salesCount: number; total: number }>();
+
+  for (const day of weekdayLabels) {
+    weekdayMap.set(day, { day, salesCount: 0, total: 0 });
+  }
+
+  for (let hour = 0; hour < 24; hour += 1) {
+    hourMap.set(hour, { hour, salesCount: 0, total: 0 });
+  }
+
+  for (const sale of sales) {
+    const customerName = String(sale.customer_name || sale.customerName || '').trim();
+    const normalizedCustomer = customerName || 'Venda rapida';
+    const saleTotal = Number(sale.total || 0);
+    const createdAtRaw = String(sale.created_at || sale.createdAt || '').trim();
+    const createdAtDate = new Date(createdAtRaw);
+
+    const currentCustomer = customerMap.get(normalizedCustomer) || {
+      name: normalizedCustomer,
+      purchases: 0,
+      totalSpent: 0,
+      lastPurchaseAt: null
+    };
+
+    currentCustomer.purchases += 1;
+    currentCustomer.totalSpent += Number.isFinite(saleTotal) ? saleTotal : 0;
+
+    if (!Number.isNaN(createdAtDate.getTime())) {
+      const iso = createdAtDate.toISOString();
+      if (!currentCustomer.lastPurchaseAt || new Date(currentCustomer.lastPurchaseAt).getTime() < createdAtDate.getTime()) {
+        currentCustomer.lastPurchaseAt = iso;
+      }
+
+      const day = weekdayLabels[createdAtDate.getDay()];
+      const daySummary = weekdayMap.get(day);
+
+      if (daySummary) {
+        daySummary.salesCount += 1;
+        daySummary.total += Number.isFinite(saleTotal) ? saleTotal : 0;
+      }
+
+      const hour = createdAtDate.getHours();
+      const hourSummary = hourMap.get(hour);
+
+      if (hourSummary) {
+        hourSummary.salesCount += 1;
+        hourSummary.total += Number.isFinite(saleTotal) ? saleTotal : 0;
+      }
+    }
+
+    customerMap.set(normalizedCustomer, currentCustomer);
+  }
+
+  const customerMetrics = Array.from(customerMap.values())
+    .map((item) => ({
+      ...item,
+      averageTicket: item.purchases > 0 ? item.totalSpent / item.purchases : 0
+    }))
+    .sort((left, right) => right.totalSpent - left.totalSpent);
+
+  const salesByWeekday = Array.from(weekdayMap.values());
+  const salesByHour = Array.from(hourMap.values());
+
+  const nowMs = Date.now();
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+  const inactiveCustomers = customerMetrics
+    .filter((customer) => customer.name !== 'Venda rapida')
+    .filter((customer) => {
+      if (!customer.lastPurchaseAt) {
+        return true;
+      }
+
+      const last = new Date(customer.lastPurchaseAt).getTime();
+      if (Number.isNaN(last)) {
+        return true;
+      }
+
+      return nowMs - last > THIRTY_DAYS_MS;
+    });
+
+  const sevenDaysAgo = nowMs - (7 * 24 * 60 * 60 * 1000);
+  const fourteenDaysAgo = nowMs - (14 * 24 * 60 * 60 * 1000);
+
+  let currentWeekRevenue = 0;
+  let previousWeekRevenue = 0;
+
+  for (const sale of sales) {
+    const createdAtMs = new Date(String(sale.created_at || sale.createdAt || '')).getTime();
+
+    if (Number.isNaN(createdAtMs)) {
+      continue;
+    }
+
+    const total = Number(sale.total || 0);
+    const normalizedTotal = Number.isFinite(total) ? total : 0;
+
+    if (createdAtMs >= sevenDaysAgo) {
+      currentWeekRevenue += normalizedTotal;
+      continue;
+    }
+
+    if (createdAtMs >= fourteenDaysAgo) {
+      previousWeekRevenue += normalizedTotal;
+    }
+  }
+
+  const trendPercent = previousWeekRevenue > 0
+    ? ((currentWeekRevenue - previousWeekRevenue) / previousWeekRevenue) * 100
+    : (currentWeekRevenue > 0 ? 100 : 0);
+
   return res.status(200).json({
     companyId,
     totalRevenue,
@@ -2163,7 +2494,18 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
     lowStockProducts,
     recentSales,
     paymentSummaryToday,
-    errors: [salesResponse.error, productsResponse.error, inventoryResponse.error].filter(Boolean)
+    productProfitability,
+    productsWithoutSales,
+    customerMetrics,
+    inactiveCustomers,
+    salesByWeekday,
+    salesByHour,
+    salesTrend: {
+      currentWeekRevenue,
+      previousWeekRevenue,
+      trendPercent
+    },
+    errors: [salesResponse.error, productsResponse.error, inventoryResponse.error, saleItemsResponse.error].filter(Boolean)
   });
 });
 
