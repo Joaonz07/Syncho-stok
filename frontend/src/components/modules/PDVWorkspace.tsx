@@ -358,6 +358,28 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
     [registers, activeRegisterId],
   );
 
+  const finalizeBlockReason = useMemo(() => {
+    if (cart.length === 0) {
+      return 'Adicione produtos ao carrinho para continuar.';
+    }
+
+    if (!activeRegister) {
+      return 'Selecione um caixa para operar no PDV.';
+    }
+
+    if (activeRegister.status !== 'online') {
+      return 'Caixa ativo fechado. Abra um caixa autorizado para finalizar venda.';
+    }
+
+    if (!String(activeRegister.operador || '').trim()) {
+      return 'Caixa sem operador. Defina o operador para finalizar venda.';
+    }
+
+    return null;
+  }, [cart.length, activeRegister]);
+
+  const canFinalizeSale = !finalizeBlockReason;
+
   const createRegister = () => {
     const registerName = newRegisterName.trim();
     const operatorName = newRegisterOperator.trim();
@@ -1180,6 +1202,12 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                     )}
                   </AnimatePresence>
 
+                  {!canFinalizeSale && cart.length > 0 ? (
+                    <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300">
+                      {finalizeBlockReason}
+                    </div>
+                  ) : null}
+
                   <div className="flex gap-2 pt-1">
                     {lastReceipt && (
                       <button
@@ -1194,7 +1222,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                     <button
                       type="button"
                       onClick={() => setPaymentModal(true)}
-                      disabled={cart.length === 0 || !activeRegister || activeRegister.status !== 'online' || !String(activeRegister.operador || '').trim()}
+                      disabled={!canFinalizeSale}
                       className="flex-1 rounded-xl bg-emerald-500 py-2.5 text-sm font-black text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Finalizar
