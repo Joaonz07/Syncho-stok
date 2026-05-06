@@ -39,6 +39,8 @@ import {
   Download,
   ReceiptText,
   Eye,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import HelpIntroCard from '../help/HelpIntroCard';
 import HelpTooltip from '../help/HelpTooltip';
@@ -160,6 +162,8 @@ const genId = () => `v-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 const SALES_KEY = 'syncho_pdv_sales_v2';
 const QUEUE_KEY = 'syncho_pdv_queue_v2';
+const REGISTERS_KEY = 'syncho_pdv_registers_v1';
+const ACTIVE_REGISTER_KEY = 'syncho_pdv_active_register_v1';
 const PDV_LOCATION_ID = 'loc-loja';
 const PDV_OPERATOR_ID = 'u-pdv';
 
@@ -336,8 +340,38 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
   const [offlineQueue, setOfflineQueue] = useState<SaleRecord[]>(() =>
     readLS<SaleRecord[]>(QUEUE_KEY, []),
   );
-  const [registers, setRegisters] = useState<Register[]>(INITIAL_REGISTERS);
-  const [activeRegisterId, setActiveRegisterId] = useState<string>(INITIAL_REGISTERS[0]?.id || '');
+  const [registers, setRegisters] = useState<Register[]>(() => {
+    const stored = readLS<Array<Partial<Register>>>(REGISTERS_KEY, []);
+
+    if (!Array.isArray(stored) || stored.length === 0) {
+      return INITIAL_REGISTERS;
+    }
+
+    return stored
+      .map((register, index) => {
+        const id = String(register.id || `cx-${index + 1}`).trim();
+        const nome = String(register.nome || '').trim() || `Caixa ${String(index + 1).padStart(2, '0')}`;
+        const operador = String(register.operador || '').trim();
+        const authorizationCode = String(register.authorizationCode || '').trim();
+        const status: RegisterStatus = register.status === 'online' || register.status === 'offline' ? register.status : 'idle';
+
+        return {
+          id,
+          nome,
+          operador,
+          authorizationCode,
+          status,
+          ultimaVenda: register.ultimaVenda,
+          abertura: register.abertura,
+          fechamento: register.fechamento,
+          fundoAbertura: Number(register.fundoAbertura || 0),
+          vendasHoje: Math.max(0, Number(register.vendasHoje || 0)),
+          totalHoje: Math.max(0, Number(register.totalHoje || 0)),
+        };
+      })
+      .filter((register) => register.id);
+  });
+  const [activeRegisterId, setActiveRegisterId] = useState<string>(() => readLS<string>(ACTIVE_REGISTER_KEY, ''));
   const [newRegisterName, setNewRegisterName] = useState('');
   const [newRegisterOperator, setNewRegisterOperator] = useState('');
   const [newRegisterAuthorization, setNewRegisterAuthorization] = useState('');
@@ -352,6 +386,25 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
     const visits = registerHelpVisit('workspace:pdv');
     setShowHelpCard(visits <= 2);
   }, []);
+
+  useEffect(() => {
+    writeLS(REGISTERS_KEY, registers);
+  }, [registers]);
+
+  useEffect(() => {
+    writeLS(ACTIVE_REGISTER_KEY, activeRegisterId);
+  }, [activeRegisterId]);
+
+  useEffect(() => {
+    if (!activeRegisterId) {
+      return;
+    }
+
+    const exists = registers.some((register) => register.id === activeRegisterId);
+    if (!exists) {
+      setActiveRegisterId('');
+    }
+  }, [activeRegisterId, registers]);
 
   const activeRegister = useMemo(
     () => registers.find((register) => register.id === activeRegisterId) || null,
@@ -469,6 +522,69 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
       };
     }));
     showToast?.('Caixa fechado.');
+  };
+
+  const editRegister = (registerId: string) => {
+    const target = registers.find((register) => register.id === registerId) || null;
+    if (!target) {
+      return;
+    }
+
+    const nome = (window.prompt('Nome do caixa:', target.nome) || '').trim();
+    if (!nome) {
+      showToast?.('Edicao cancelada: nome do caixa e obrigatorio.');
+      return;
+    }
+
+    const operador = (window.prompt('Operador responsavel:', target.operador) || '').trim();
+    if (target.status === 'online' && !operador) {
+      showToast?.('Nao e permitido caixa aberto sem operador.');
+      return;
+    }
+
+    const authorizationCode = (window.prompt('Codigo de autorizacao do caixa:', target.authorizationCode) || '').trim();
+    if (!authorizationCode || authorizationCode.length < 4) {
+      showToast?.('Codigo de autorizacao invalido. Use ao menos 4 caracteres.');
+      return;
+    }
+
+    const fundoPrompt = window.prompt('Fundo inicial:', String(target.fundoAbertura || 0));
+    const fundoAbertura = Math.max(0, Number(fundoPrompt || target.fundoAbertura || 0));
+
+    setRegisters((prev) =>
+      prev.map((register) =>
+        register.id === registerId
+          ? { ...register, nome, operador, authorizationCode, fundoAbertura }
+          : register,
+      ),
+    );
+
+    showToast?.('Caixa atualizado com sucesso.');
+  };
+
+  const deleteRegister = (registerId: string) => {
+    const target = registers.find((register) => register.id === registerId) || null;
+    if (!target) {
+      return;
+    }
+
+    if (target.status === 'online') {
+      showToast?.('Feche o caixa antes de excluir.');
+      return;
+    }
+
+    const confirmed = window.confirm(`Excluir ${target.nome}? Esta acao nao pode ser desfeita.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setRegisters((prev) => prev.filter((register) => register.id !== registerId));
+
+    if (activeRegisterId === registerId) {
+      setActiveRegisterId('');
+    }
+
+    showToast?.('Caixa excluido com sucesso.');
   };
 
   const refreshSharedProducts = useCallback((source?: string) => {
@@ -1724,6 +1840,25 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                         Fechar caixa
                       </button>
                     )}
+
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editRegister(reg.id)}
+                        className="inline-flex items-center justify-center gap-1 rounded-xl bg-slate-700/70 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteRegister(reg.id)}
+                        className="inline-flex items-center justify-center gap-1 rounded-xl bg-rose-500/10 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/20"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Excluir
+                      </button>
+                    </div>
 
                     <button
                       type="button"
