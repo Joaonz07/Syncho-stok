@@ -180,30 +180,42 @@ type StockMove = {
 function calculateStockByProductLocation(movements: StockMove[]) {
   const map = new Map<string, number>();
   const keyOf = (productId: string, locationId: string) => `${productId}::${locationId}`;
+  const processedMovements = new Set<string>();
 
   for (const movement of movements) {
+    const movementId = String(movement.id || '').trim();
+    if (!movementId || processedMovements.has(movementId)) {
+      continue;
+    }
+    processedMovements.add(movementId);
+
+    const quantity = Number(movement.quantidade || 0);
+    if (!Number.isFinite(quantity) || quantity === 0) {
+      continue;
+    }
+
     if (movement.tipo === 'ENTRADA' && movement.localDestinoId) {
       const key = keyOf(movement.produtoId, movement.localDestinoId);
-      map.set(key, Number(map.get(key) || 0) + movement.quantidade);
+      map.set(key, Number(map.get(key) || 0) + quantity);
     }
 
     if (movement.tipo === 'SAIDA' && movement.localOrigemId) {
       const key = keyOf(movement.produtoId, movement.localOrigemId);
-      map.set(key, Number(map.get(key) || 0) - movement.quantidade);
+      map.set(key, Number(map.get(key) || 0) - quantity);
     }
 
     if (movement.tipo === 'AJUSTE') {
       const locationId = movement.localOrigemId || movement.localDestinoId;
       if (!locationId) continue;
       const key = keyOf(movement.produtoId, locationId);
-      map.set(key, Number(map.get(key) || 0) + movement.quantidade);
+      map.set(key, Number(map.get(key) || 0) + quantity);
     }
 
     if (movement.tipo === 'TRANSFERENCIA' && movement.localOrigemId && movement.localDestinoId) {
       const fromKey = keyOf(movement.produtoId, movement.localOrigemId);
       const toKey = keyOf(movement.produtoId, movement.localDestinoId);
-      map.set(fromKey, Number(map.get(fromKey) || 0) - movement.quantidade);
-      map.set(toKey, Number(map.get(toKey) || 0) + movement.quantidade);
+      map.set(fromKey, Number(map.get(fromKey) || 0) - quantity);
+      map.set(toKey, Number(map.get(toKey) || 0) + quantity);
     }
   }
 
