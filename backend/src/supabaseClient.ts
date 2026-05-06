@@ -1,13 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = String(process.env.SUPABASE_URL || '').trim();
-const supabaseKey =
-  String(
-    process.env.SUPABASE_KEY ||
-      process.env.SUPABASE_ANON_KEY ||
-      process.env.SUPABASE_PUBLIC_KEY ||
-      ''
-  ).trim();
 const supabaseServiceKey =
   String(
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -15,12 +8,20 @@ const supabaseServiceKey =
       process.env.SUPABASE_KEY ||
       ''
   ).trim();
+const supabaseKey =
+  String(
+    process.env.SUPABASE_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_PUBLIC_KEY ||
+      supabaseServiceKey ||
+      ''
+  ).trim();
 
-if (!supabaseUrl || !supabaseKey) {
+if (!supabaseUrl || !supabaseServiceKey) {
   const missing: string[] = [];
 
   if (!supabaseUrl) missing.push('SUPABASE_URL');
-  if (!supabaseKey) missing.push('SUPABASE_KEY');
+  if (!supabaseServiceKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
 
   throw new Error(`Missing Supabase environment variables: ${missing.join(', ')}`);
 }

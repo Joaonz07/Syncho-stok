@@ -1,6 +1,6 @@
 # Syncho CRM
 
-Projeto com frontend React + Vite e backend Express + TypeScript, preparados para deploy separado no Railway.
+Projeto com frontend React + Vite e backend Express + TypeScript, preparados para deploy separado no Vercel.
 
 ## Estrutura
 
@@ -16,7 +16,7 @@ PORT=5000
 SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_KEY=your-supabase-service-role-key
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
-FRONTEND_URL=https://seu-frontend.up.railway.app
+FRONTEND_URL=https://seu-frontend.vercel.app
 SERVE_STATIC_FRONTEND=false
 ```
 
@@ -25,7 +25,7 @@ Frontend: copie frontend/.env.example para frontend/.env e preencha:
 ```env
 VITE_SUPABASE_URL=https://your-project-id.supabase.co
 VITE_SUPABASE_KEY=your-supabase-public-key
-VITE_API_URL=https://seu-backend.up.railway.app
+VITE_API_URL=https://seu-backend.vercel.app
 ```
 
 ## Desenvolvimento local
@@ -66,79 +66,63 @@ npm run build
 npm run preview
 ```
 
-## Deploy no Railway - Arquitetura Separada
+## Deploy no Vercel - Arquitetura Separada
 
-Este projeto usa **dois serviços independentes** no Railway:
+Este projeto usa **dois projetos independentes** no Vercel:
 
-### 1️⃣ Backend Service (noble-warmth)
+### 1️⃣ Backend Project
 
-**URL gerada:** `https://noble-warmth-production-bde7.up.railway.app`
+**Root Directory:** `backend`
 
-Configuração Railway:
-- **Root Directory:** `backend`
-- **Build Command:** `npm install && npm run build`
-- **Start Command:** `npm start`
-- **Healthcheck Path:** `/health`
+Arquivo pronto no repo:
+- `backend/vercel.json`
+- `backend/api/index.ts`
 
-Variáveis de Ambiente (preencha no Railway):
+Variáveis de Ambiente (preencha no Vercel):
 ```
-PORT=                              # Railway auto-atribui
 NODE_ENV=production
 SUPABASE_URL=https://tdjldzfrhwaxnbmpcaup.supabase.co
 SUPABASE_KEY=eyJhbGciOiJIUzI1Ni...
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1Ni...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1Ni...
-FRONTEND_URL=https://syncho-frontend.up.railway.app     # (será criado no passo 2)
+FRONTEND_URL=https://syncho-frontend.vercel.app
 SERVE_STATIC_FRONTEND=false
 ```
 
-### 2️⃣ Frontend Service (criar novo)
+### 2️⃣ Frontend Project
 
-**Passo-a-passo para criar:**
+**Root Directory:** `frontend`
 
-1. Acesse **https://railway.app** → Dashboard
-2. Clique em **+ New** → **GitHub Repo** → Selecione `Syncho-stok`
-3. Configure o novo serviço:
-   - **Service Name:** `syncho-frontend`
-   - **Root Directory:** `frontend`
-   - **Build Command:** `npm install && npm run build`
-   - **Start Command:** `npm run preview`
+Arquivo pronto no repo:
+- `frontend/vercel.json`
 
-4. Após criar, vá em **Variables** e adicione:
-   ```
-   PORT=4173
-   VITE_SUPABASE_URL=https://tdjldzfrhwaxnbmpcaup.supabase.co
-   VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-   VITE_API_URL=https://noble-warmth-production-bde7.up.railway.app
-   ```
+Variáveis de Ambiente (preencha no Vercel):
+```
+VITE_SUPABASE_URL=https://tdjldzfrhwaxnbmpcaup.supabase.co
+VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+VITE_API_URL=https://syncho-backend.vercel.app
+```
 
-5. Deploy vai iniciar automaticamente. Aguarde até ficar **ACTIVE** (verde).
+### 3️⃣ Ajustar CORS do backend
 
-6. **Copie a URL gerada** do frontend (ex: `syncho-frontend.up.railway.app`)
-
-### 3️⃣ Atualizar Backend com URL do Frontend
-
-Após o frontend estar ACTIVE:
-
-1. Volte ao serviço **noble-warmth** no Railway
-2. Vá em **Variables**
-3. Atualize: `FRONTEND_URL=https://syncho-frontend.up.railway.app`
-4. Salve → Backend vai fazer redeploy automaticamente
+No projeto backend do Vercel, ajuste `FRONTEND_URL` com a URL real do frontend publicado.
 
 ### ✅ Validação Final
 
-Acesse `https://syncho-frontend.up.railway.app` no navegador:
-- ✅ Deve mostrar página de login
-- ✅ Após login, deve conectar ao backend
-- ✅ Dados devem persistir no Supabase
-- ✅ Sockets devem funcionar (verifique chat/notificações)
+1. Backend: `https://<backend>.vercel.app/health` deve retornar `{ status: "OK" }`
+2. Frontend: abrir `https://<frontend>.vercel.app`
+3. Login, dashboard e CRUD devem funcionar com API em `/api/*` do backend
+
+### Observação importante sobre Socket.IO no Vercel
+
+- O Vercel Serverless atende HTTP, mas não mantém servidor Socket.IO persistente da mesma forma que um Node dedicado.
+- Fluxos de tempo real por WebSocket (chat/presença) podem ter limitação no Vercel.
+- Se o tempo real for crítico, mantenha o socket em um serviço dedicado e use o backend Vercel para REST.
 
 ## Integração em produção
 
 - O frontend usa VITE_API_URL para todas as requisições HTTP.
-- O Socket.io também conecta usando VITE_API_URL.
 - O backend restringe CORS usando FRONTEND_URL.
-- Se quiser servir o frontend pelo backend no mesmo processo, defina SERVE_STATIC_FRONTEND=true e disponibilize um index.html compilado em backend/public.
+- Para Vercel, manter `SERVE_STATIC_FRONTEND=false` no backend.
 
 ## Checklist pós-deploy
 
