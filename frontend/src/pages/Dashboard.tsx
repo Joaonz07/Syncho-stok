@@ -62,11 +62,13 @@ import HelpTooltip from '../components/help/HelpTooltip';
 import { registerHelpVisit, resetHelpProgress } from '../lib/helpProgress';
 
 type LeadStatus =
-  | 'NOVO_CONTATO'
-  | 'EM_CONTATO'
-  | 'APRESENTACAO'
+  | 'NOVO'
+  | 'CONTATO'
+  | 'QUALIFICADO'
+  | 'PROPOSTA'
   | 'NEGOCIACAO'
-  | 'FECHAMENTO';
+  | 'FECHADO'
+  | 'PERDIDO';
 
 type LeadPriority = 'BAIXA' | 'MEDIA' | 'ALTA';
 
@@ -78,8 +80,49 @@ type Lead = {
   position?: number;
   value: number;
   notes: string;
+  phone?: string;
+  email?: string;
+  source?: string;
+  interest?: string;
+  ownerId?: string;
+  ownerName?: string;
+  interactionsCount?: number;
+  tasksOverdue?: number;
   company_id?: string;
   companyId?: string;
+};
+
+type CrmInteractionType = 'CALL' | 'MESSAGE' | 'MEETING' | 'SALE' | 'NOTE';
+type CrmTaskPriority = 'BAIXA' | 'MEDIA' | 'ALTA';
+type CrmTaskStatus = 'PENDENTE' | 'CONCLUIDA';
+
+type CrmInteraction = {
+  id: string;
+  type: CrmInteractionType;
+  content: string;
+  happenedAt: string;
+  createdAt: string;
+  createdById: string;
+  createdByName: string;
+};
+
+type CrmTask = {
+  id: string;
+  title: string;
+  dueDate: string;
+  priority: CrmTaskPriority;
+  status: CrmTaskStatus;
+  assignedToId: string;
+  assignedToName: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CrmLeadProfile = Lead & {
+  totalGenerated: number;
+  purchases: Array<Record<string, unknown>>;
+  interactions: CrmInteraction[];
+  tasks: CrmTask[];
 };
 
 type CompanyPlan = 'BASIC' | 'PRO' | 'PREMIUM';
@@ -189,11 +232,22 @@ type SalesAnalysis = {
     id: string;
     total: number;
     userId: string | null;
+    operatorName?: string | null;
+    cashierName?: string | null;
     customerName?: string | null;
     paymentMethod?: 'cash' | 'pix' | 'card' | string | null;
     amountReceived?: number;
     changeDue?: number;
     createdAt: string;
+    items?: Array<{
+      productId: string;
+      name: string;
+      quantity: number;
+      unitPrice: number;
+      total: number;
+      unitCost: number;
+      estimatedCost: number;
+    }>;
   }>;
   paymentSummaryToday?: Array<{
     method: 'cash' | 'pix' | 'card';
@@ -267,10 +321,10 @@ type SidebarPath = DashboardView | 'pdv';
 
 const beginnerHelpByView: Record<DashboardView, { title: string; description: string; example: string; tooltip: string }> = {
   pipeline: {
-    title: 'Funil de clientes',
-    description: 'Aqui voce acompanha em que etapa cada cliente esta, desde o primeiro contato ate o fechamento.',
-    example: 'Exemplo: mover um cliente de "Em contato" para "Negociacao".',
-    tooltip: 'Use esta tela para saber quem precisa de retorno hoje.'
+    title: 'CRM',
+    description: 'Aqui voce gerencia apenas os leads no kanban comercial, por etapa do funil.',
+    example: 'Exemplo: mover um lead de "Novo contato" para "Negociacao".',
+    tooltip: 'Use esta tela para organizar follow-ups e evolucao dos leads.'
   },
   companies: {
     title: 'Empresas',
@@ -315,10 +369,10 @@ const beginnerHelpByView: Record<DashboardView, { title: string; description: st
     tooltip: 'Descreva o problema com detalhes para acelerar a resposta.'
   },
   analytics: {
-    title: 'Analise',
-    description: 'Aqui voce entende o que esta vendendo bem e onde melhorar.',
-    example: 'Exemplo: ver produtos com mais lucro e itens com baixo estoque.',
-    tooltip: 'Use esta tela para decidir o que repor, promover ou ajustar.'
+    title: 'Dashboard',
+    description: 'Aqui voce acompanha indicadores gerais e graficos para tomada de decisao.',
+    example: 'Exemplo: comparar receita, conversao e tendencia semanal.',
+    tooltip: 'Use esta tela para monitorar o negocio como um todo.'
   },
   admin: {
     title: 'Admin',
@@ -432,12 +486,39 @@ type IntegrationApiConfig = {
 };
 
 const columns: Array<{ key: LeadStatus; label: string }> = [
-  { key: 'NOVO_CONTATO', label: 'Novo contato' },
-  { key: 'EM_CONTATO', label: 'Em contato' },
-  { key: 'APRESENTACAO', label: 'Apresentacao' },
+  { key: 'NOVO', label: 'Novo' },
+  { key: 'CONTATO', label: 'Contato' },
+  { key: 'QUALIFICADO', label: 'Qualificado' },
+  { key: 'PROPOSTA', label: 'Proposta' },
   { key: 'NEGOCIACAO', label: 'Negociacao' },
-  { key: 'FECHAMENTO', label: 'Fechamento' }
+  { key: 'FECHADO', label: 'Fechado' },
+  { key: 'PERDIDO', label: 'Perdido' }
 ];
+
+const normalizeLeadStatus = (rawStatus: unknown): LeadStatus => {
+  const status = String(rawStatus || '').trim().toUpperCase();
+
+  switch (status) {
+    case 'NOVO_CONTATO':
+      return 'NOVO';
+    case 'EM_CONTATO':
+      return 'CONTATO';
+    case 'APRESENTACAO':
+      return 'QUALIFICADO';
+    case 'FECHAMENTO':
+      return 'FECHADO';
+    case 'NOVO':
+    case 'CONTATO':
+    case 'QUALIFICADO':
+    case 'PROPOSTA':
+    case 'NEGOCIACAO':
+    case 'FECHADO':
+    case 'PERDIDO':
+      return status;
+    default:
+      return 'NOVO';
+  }
+};
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
@@ -610,11 +691,13 @@ const getCompanyIdFromJwt = (jwt: string) => {
 };
 
 const salesStages: Array<{ key: LeadStatus; label: string; shortLabel: string }> = [
-  { key: 'NOVO_CONTATO', label: 'Busca', shortLabel: 'Busca' },
-  { key: 'EM_CONTATO', label: 'Oferta', shortLabel: 'Oferta' },
-  { key: 'APRESENTACAO', label: 'Negociacao', shortLabel: 'Negociacao' },
-  { key: 'NEGOCIACAO', label: 'Acordo', shortLabel: 'Acordo' },
-  { key: 'FECHAMENTO', label: 'Fechamento', shortLabel: 'Fechamento' }
+  { key: 'NOVO', label: 'Novo', shortLabel: 'Novo' },
+  { key: 'CONTATO', label: 'Contato', shortLabel: 'Contato' },
+  { key: 'QUALIFICADO', label: 'Qualificado', shortLabel: 'Qualif.' },
+  { key: 'PROPOSTA', label: 'Proposta', shortLabel: 'Proposta' },
+  { key: 'NEGOCIACAO', label: 'Negociacao', shortLabel: 'Negoc.' },
+  { key: 'FECHADO', label: 'Fechado', shortLabel: 'Fechado' },
+  { key: 'PERDIDO', label: 'Perdido', shortLabel: 'Perdido' }
 ];
 
 const acquisitionSources = ['Chamadas', 'Apresentacoes', 'E-mail', 'Landing Page'] as const;
@@ -931,19 +1014,26 @@ const Dashboard = () => {
   const companyIdFromJwt = useMemo(() => getCompanyIdFromJwt(token), [token]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [activeView, setActiveView] = useState<DashboardView>('pipeline');
-  const [activeMenuName, setActiveMenuName] = useState('Vendas');
+  const [activeView, setActiveView] = useState<DashboardView>('analytics');
+  const [activeMenuName, setActiveMenuName] = useState('Dashboard');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [showHelpCard, setShowHelpCard] = useState(true);
-  const [formColumn, setFormColumn] = useState<LeadStatus | null>('NOVO_CONTATO');
+  const [formColumn, setFormColumn] = useState<LeadStatus | null>('NOVO');
 
   const [name, setName] = useState('');
+  const [leadPhone, setLeadPhone] = useState('');
+  const [leadEmail, setLeadEmail] = useState('');
+  const [leadSource, setLeadSource] = useState('');
+  const [leadInterest, setLeadInterest] = useState('');
+  const [leadOwnerId, setLeadOwnerId] = useState('');
+  const [leadOwnerName, setLeadOwnerName] = useState('');
   const [priority, setPriority] = useState<LeadPriority>('MEDIA');
   const [notes, setNotes] = useState('');
   const [value, setValue] = useState('');
   const [filterPriority, setFilterPriority] = useState<'ALL' | LeadPriority>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | LeadStatus>('ALL');
+  const [filterOwnerId, setFilterOwnerId] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<LeadStatus | null>(null);
@@ -953,9 +1043,26 @@ const Dashboard = () => {
   const [rejectionViewMode, setRejectionViewMode] = useState<'table' | 'funnel'>('table');
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editSource, setEditSource] = useState('');
+  const [editInterest, setEditInterest] = useState('');
+  const [editOwnerId, setEditOwnerId] = useState('');
+  const [editOwnerName, setEditOwnerName] = useState('');
   const [editPriority, setEditPriority] = useState<LeadPriority>('MEDIA');
   const [editNotes, setEditNotes] = useState('');
   const [editValue, setEditValue] = useState('');
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [crmProfile, setCrmProfile] = useState<CrmLeadProfile | null>(null);
+  const [crmLoading, setCrmLoading] = useState(false);
+  const [crmMetricsLoading, setCrmMetricsLoading] = useState(false);
+  const [crmMetrics, setCrmMetrics] = useState<{ totalLeads: number; won: number; lost: number; conversionRate: number; avgCloseDays: number } | null>(null);
+  const [crmRanking, setCrmRanking] = useState<Array<{ ownerId: string; ownerName: string; leads: number; won: number; lost: number; revenue: number }>>([]);
+  const [interactionType, setInteractionType] = useState<CrmInteractionType>('CALL');
+  const [interactionContent, setInteractionContent] = useState('');
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDueDate, setTaskDueDate] = useState('');
+  const [taskPriority, setTaskPriority] = useState<CrmTaskPriority>('MEDIA');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -1121,8 +1228,10 @@ const Dashboard = () => {
   const [salePaymentMethod, setSalePaymentMethod] = useState<'cash' | 'pix' | 'card'>('pix');
   const [saleAmountReceivedInput, setSaleAmountReceivedInput] = useState('');
   const [saleHistorySearch, setSaleHistorySearch] = useState('');
-  const [saleHistoryStatusFilter, setSaleHistoryStatusFilter] = useState<'ALL' | 'CONCLUIDA'>('ALL');
+  const [saleHistoryStartDate, setSaleHistoryStartDate] = useState('');
+  const [saleHistoryEndDate, setSaleHistoryEndDate] = useState('');
   const [saleHistoryPaymentFilter, setSaleHistoryPaymentFilter] = useState<'ALL' | 'cash' | 'pix' | 'card'>('ALL');
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesAnalysis, setSalesAnalysis] = useState<SalesAnalysis | null>(null);
   const [uiTheme, setUiTheme] = useState<'light' | 'dark'>(() => {
@@ -1263,13 +1372,27 @@ const Dashboard = () => {
         return false;
       }
 
-      if (normalizedSearch && !String(lead.name || '').toLowerCase().includes(normalizedSearch)) {
+      if (filterOwnerId !== 'ALL' && String(lead.ownerId || '').trim() !== filterOwnerId) {
+        return false;
+      }
+
+      if (
+        normalizedSearch
+        && ![
+          String(lead.name || ''),
+          String(lead.email || ''),
+          String(lead.phone || ''),
+          String(lead.source || ''),
+          String(lead.interest || ''),
+          String(lead.ownerName || '')
+        ].some((value) => value.toLowerCase().includes(normalizedSearch))
+      ) {
         return false;
       }
 
       return true;
     });
-  }, [leads, filterPriority, filterStatus, searchTerm]);
+  }, [leads, filterPriority, filterStatus, filterOwnerId, searchTerm]);
 
   const board = useMemo(() => {
     const map = new Map<LeadStatus, Lead[]>(columns.map((column) => [column.key, []]));
@@ -1291,6 +1414,11 @@ const Dashboard = () => {
       .filter((user) => user.id);
   }, [managedUsers]);
 
+  const crmOwnerOptions = useMemo(
+    () => funnelSellerOptions,
+    [funnelSellerOptions]
+  );
+
   const funnelLeadsEnriched = useMemo(() => {
     const stageIndexMap = new Map<LeadStatus, number>(salesStages.map((stage, index) => [stage.key, index]));
 
@@ -1307,7 +1435,7 @@ const Dashboard = () => {
         sellerId: seller?.id || '',
         sellerName: seller?.name || 'Nao atribuido',
         stageIndex,
-        estimatedSalesValue: Number(lead.value || 0) * (lead.status === 'FECHAMENTO' ? 1 : 0.35 + stageIndex * 0.13)
+        estimatedSalesValue: Number(lead.value || 0) * (lead.status === 'FECHADO' ? 1 : 0.35 + stageIndex * 0.13)
       };
     });
   }, [leads, funnelSellerOptions]);
@@ -1703,41 +1831,65 @@ const Dashboard = () => {
   const salesHistoryRows = useMemo(() => {
     return (salesAnalysis?.recentSales || []).map((sale) => ({
       id: String(sale.id || ''),
+      date: String(sale.createdAt || ''),
       customer: String(sale.customerName || '').trim() || 'Venda rapida',
+      cashier: String(sale.cashierName || '').trim() || '-',
+      operator: String(sale.operatorName || '').trim() || String(sale.userId || '').trim() || '-',
       total: Number(sale.total || 0),
       paymentMethodKey: String(sale.paymentMethod || '').trim().toLowerCase() || 'pix',
       paymentMethod: formatSalePaymentMethod(sale.paymentMethod),
-      amountReceived: Number(sale.amountReceived || 0),
-      changeDue: Number(sale.changeDue || 0),
       createdAt: String(sale.createdAt || ''),
-      status: 'CONCLUIDA' as const
+      items: (sale.items || []).map((item) => ({
+        productId: String(item.productId || ''),
+        name: String(item.name || 'Produto sem nome'),
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.unitPrice || 0),
+        total: Number(item.total || 0),
+        unitCost: Number(item.unitCost || 0),
+        estimatedCost: Number(item.estimatedCost || 0)
+      }))
     }));
   }, [salesAnalysis]);
 
   const filteredSalesHistoryRows = useMemo(() => {
-    const search = saleHistorySearch.trim().toLowerCase();
+    const customerSearch = saleHistorySearch.trim().toLowerCase();
+    const startDate = saleHistoryStartDate ? new Date(`${saleHistoryStartDate}T00:00:00`) : null;
+    const endDate = saleHistoryEndDate ? new Date(`${saleHistoryEndDate}T23:59:59`) : null;
 
     return salesHistoryRows.filter((row) => {
-      if (saleHistoryStatusFilter !== 'ALL' && row.status !== saleHistoryStatusFilter) {
-        return false;
-      }
+      const rowDate = new Date(row.createdAt);
 
       if (saleHistoryPaymentFilter !== 'ALL' && row.paymentMethodKey !== saleHistoryPaymentFilter) {
         return false;
       }
 
-      if (!search) {
+      if (!Number.isNaN(rowDate.getTime())) {
+        if (startDate && rowDate < startDate) {
+          return false;
+        }
+
+        if (endDate && rowDate > endDate) {
+          return false;
+        }
+      }
+
+      if (!customerSearch) {
         return true;
       }
 
-      return (
-        row.customer.toLowerCase().includes(search)
-        || row.id.toLowerCase().includes(search)
-        || row.paymentMethod.toLowerCase().includes(search)
-        || formatCurrency(row.total).toLowerCase().includes(search)
-      );
+      return row.customer.toLowerCase().includes(customerSearch);
     });
-  }, [saleHistoryPaymentFilter, saleHistorySearch, saleHistoryStatusFilter, salesHistoryRows]);
+  }, [saleHistoryEndDate, saleHistoryPaymentFilter, saleHistorySearch, saleHistoryStartDate, salesHistoryRows]);
+
+  const selectedSale = useMemo(
+    () => filteredSalesHistoryRows.find((sale) => sale.id === selectedSaleId) || null,
+    [filteredSalesHistoryRows, selectedSaleId]
+  );
+
+  const salesProfitTotal = useMemo(
+    () => (salesAnalysis?.productProfitability || []).reduce((sum, item) => sum + Number(item.profit || 0), 0),
+    [salesAnalysis]
+  );
 
   const salesTodayByPayment = useMemo(() => {
     const rows = salesAnalysis?.paymentSummaryToday || [];
@@ -1778,15 +1930,14 @@ const Dashboard = () => {
 
     const dateTag = new Date().toISOString().slice(0, 10);
     const rows = [
-      ['id', 'cliente', 'total', 'pagamento', 'recebido', 'troco', 'status', 'data'],
+      ['id', 'cliente', 'caixa', 'operador', 'total', 'pagamento', 'data'],
       ...filteredSalesHistoryRows.map((sale) => [
         sale.id,
         sale.customer,
+        sale.cashier,
+        sale.operator,
         Number(sale.total || 0).toFixed(2),
         sale.paymentMethod,
-        Number(sale.amountReceived || 0).toFixed(2),
-        Number(sale.changeDue || 0).toFixed(2),
-        sale.status,
         sale.createdAt
       ])
     ];
@@ -1866,7 +2017,7 @@ const Dashboard = () => {
       };
     });
 
-    const closed = stageCounts.find((stage) => stage.key === 'FECHAMENTO')?.count || 0;
+    const closed = stageCounts.find((stage) => stage.key === 'FECHADO')?.count || 0;
     const overallConversion = totalLeads > 0 ? (closed / totalLeads) * 100 : 0;
 
     return {
@@ -3170,12 +3321,185 @@ const Dashboard = () => {
         return;
       }
 
-      setLeads((result.leads || []) as Lead[]);
+      const normalizedLeads = ((result.leads || []) as Lead[]).map((lead) => ({
+        ...lead,
+        status: normalizeLeadStatus(lead.status)
+      }));
+      setLeads(normalizedLeads);
       setStatus('Leads carregados com sucesso.');
     } catch (_error) {
       setStatus('Erro de rede ao carregar leads.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCrmProfile = async (leadId: string) => {
+    if (!token || !companyId) {
+      return;
+    }
+
+    setCrmLoading(true);
+
+    try {
+      const response = await fetch(
+        `/api/dashboard/crm/leads/${encodeURIComponent(leadId)}/profile?companyId=${encodeURIComponent(companyId)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao carregar perfil do lead.');
+        return;
+      }
+
+      setCrmProfile(result.lead as CrmLeadProfile);
+    } catch (_error) {
+      setStatus('Erro de rede ao carregar perfil do lead.');
+    } finally {
+      setCrmLoading(false);
+    }
+  };
+
+  const fetchCrmMetrics = async (ownerId?: string) => {
+    if (!token || !companyId) {
+      return;
+    }
+
+    setCrmMetricsLoading(true);
+
+    try {
+      const ownerQuery = ownerId ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
+      const response = await fetch(
+        `/api/dashboard/crm/metrics?companyId=${encodeURIComponent(companyId)}${ownerQuery}`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao carregar metricas de CRM.');
+        return;
+      }
+
+      setCrmMetrics(result.metrics || null);
+      setCrmRanking(result.ranking || []);
+    } catch (_error) {
+      setStatus('Erro de rede ao carregar metricas de CRM.');
+    } finally {
+      setCrmMetricsLoading(false);
+    }
+  };
+
+  const handleCreateInteraction = async () => {
+    if (!token || !companyId || !selectedLeadId || !interactionContent.trim()) {
+      setStatus('Selecione um lead e descreva a interacao.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/dashboard/crm/leads/${encodeURIComponent(selectedLeadId)}/interactions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          companyId,
+          type: interactionType,
+          content: interactionContent.trim(),
+          happenedAt: new Date().toISOString()
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao registrar interacao.');
+        return;
+      }
+
+      setInteractionContent('');
+      await fetchCrmProfile(selectedLeadId);
+      await fetchCrmMetrics(filterOwnerId !== 'ALL' ? filterOwnerId : undefined);
+      showToast('Interacao registrada');
+    } catch (_error) {
+      setStatus('Erro de rede ao registrar interacao.');
+    }
+  };
+
+  const handleCreateTask = async () => {
+    if (!token || !companyId || !selectedLeadId) {
+      setStatus('Selecione um lead para criar tarefa.');
+      return;
+    }
+
+    if (!taskTitle.trim() || !taskDueDate) {
+      setStatus('Informe titulo e data da tarefa.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/dashboard/crm/leads/${encodeURIComponent(selectedLeadId)}/tasks`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          companyId,
+          title: taskTitle.trim(),
+          dueDate: taskDueDate,
+          priority: taskPriority,
+          assignedToId: crmProfile?.ownerId || '',
+          assignedToName: crmProfile?.ownerName || ''
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao criar tarefa.');
+        return;
+      }
+
+      setTaskTitle('');
+      setTaskDueDate('');
+      setTaskPriority('MEDIA');
+      await fetchCrmProfile(selectedLeadId);
+      showToast('Tarefa criada');
+    } catch (_error) {
+      setStatus('Erro de rede ao criar tarefa.');
+    }
+  };
+
+  const toggleTaskStatus = async (task: CrmTask) => {
+    if (!token || !companyId || !selectedLeadId) {
+      return;
+    }
+
+    const nextStatus: CrmTaskStatus = task.status === 'CONCLUIDA' ? 'PENDENTE' : 'CONCLUIDA';
+
+    try {
+      const response = await fetch(`/api/dashboard/crm/leads/${encodeURIComponent(selectedLeadId)}/tasks/${encodeURIComponent(task.id)}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ companyId, status: nextStatus })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setStatus(result.message || 'Falha ao atualizar tarefa.');
+        return;
+      }
+
+      await fetchCrmProfile(selectedLeadId);
+    } catch (_error) {
+      setStatus('Erro de rede ao atualizar tarefa.');
     }
   };
 
@@ -3193,6 +3517,43 @@ const Dashboard = () => {
     viewDataCacheRef.current.leadsKey = cacheKey;
     void fetchLeads();
   }, [activeView, token, companyId, role, leads.length]);
+
+  useEffect(() => {
+    if (activeView !== 'pipeline') {
+      return;
+    }
+
+    void fetchCrmMetrics(filterOwnerId !== 'ALL' ? filterOwnerId : undefined);
+  }, [activeView, filterOwnerId, token, companyId]);
+
+  useEffect(() => {
+    if (!selectedLeadId || activeView !== 'pipeline') {
+      setCrmProfile(null);
+      return;
+    }
+
+    void fetchCrmProfile(selectedLeadId);
+  }, [selectedLeadId, activeView, token, companyId]);
+
+  useEffect(() => {
+    if (activeView !== 'pipeline') {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void fetchLeads();
+
+      if (selectedLeadId) {
+        void fetchCrmProfile(selectedLeadId);
+      }
+
+      void fetchCrmMetrics(filterOwnerId !== 'ALL' ? filterOwnerId : undefined);
+    }, 15000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeView, selectedLeadId, filterOwnerId, token, companyId]);
 
   useEffect(() => {
     if (role === 'ADMIN') {
@@ -3446,6 +3807,32 @@ const Dashboard = () => {
   }, [activeView, token, salesCompanyId, salesAnalysis]);
 
   useEffect(() => {
+    if (!leads.length) {
+      setSelectedLeadId(null);
+      return;
+    }
+
+    if (selectedLeadId && leads.some((lead) => lead.id === selectedLeadId)) {
+      return;
+    }
+
+    setSelectedLeadId(leads[0]?.id || null);
+  }, [leads, selectedLeadId]);
+
+  useEffect(() => {
+    if (!filteredSalesHistoryRows.length) {
+      setSelectedSaleId(null);
+      return;
+    }
+
+    if (selectedSaleId && filteredSalesHistoryRows.some((sale) => sale.id === selectedSaleId)) {
+      return;
+    }
+
+    setSelectedSaleId(filteredSalesHistoryRows[0]?.id || null);
+  }, [filteredSalesHistoryRows, selectedSaleId]);
+
+  useEffect(() => {
     viewDataCacheRef.current = {
       leadsKey: '',
       productsKey: '',
@@ -3483,6 +3870,12 @@ const Dashboard = () => {
       priority,
       notes: notes.trim(),
       value: Number(value || 0),
+      phone: leadPhone.trim(),
+      email: leadEmail.trim().toLowerCase(),
+      source: leadSource.trim(),
+      interest: leadInterest.trim(),
+      ownerId: leadOwnerId.trim(),
+      ownerName: leadOwnerName.trim(),
       companyId
     };
 
@@ -3507,7 +3900,14 @@ const Dashboard = () => {
 
       const created = result.lead as Lead;
       setLeads((prev) => [...prev, created]);
+      setSelectedLeadId(created.id);
       setName('');
+      setLeadPhone('');
+      setLeadEmail('');
+      setLeadSource('');
+      setLeadInterest('');
+      setLeadOwnerId('');
+      setLeadOwnerName('');
       setNotes('');
       setValue('');
       setPriority('MEDIA');
@@ -4723,6 +5123,12 @@ const Dashboard = () => {
   const openEditModal = (lead: Lead) => {
     setEditingLeadId(lead.id);
     setEditName(lead.name || '');
+    setEditPhone(lead.phone || '');
+    setEditEmail(lead.email || '');
+    setEditSource(lead.source || '');
+    setEditInterest(lead.interest || '');
+    setEditOwnerId(lead.ownerId || '');
+    setEditOwnerName(lead.ownerName || '');
     setEditPriority(lead.priority || 'MEDIA');
     setEditNotes(lead.notes || '');
     setEditValue(String(Number(lead.value || 0)));
@@ -4731,6 +5137,12 @@ const Dashboard = () => {
   const closeEditModal = () => {
     setEditingLeadId(null);
     setEditName('');
+    setEditPhone('');
+    setEditEmail('');
+    setEditSource('');
+    setEditInterest('');
+    setEditOwnerId('');
+    setEditOwnerName('');
     setEditPriority('MEDIA');
     setEditNotes('');
     setEditValue('');
@@ -4752,6 +5164,12 @@ const Dashboard = () => {
         ? {
             ...lead,
             name: editName.trim(),
+            phone: editPhone.trim(),
+            email: editEmail.trim().toLowerCase(),
+            source: editSource.trim(),
+            interest: editInterest.trim(),
+            ownerId: editOwnerId.trim(),
+            ownerName: editOwnerName.trim(),
             priority: editPriority,
             notes: editNotes.trim(),
             value: Number(editValue || 0)
@@ -4770,6 +5188,12 @@ const Dashboard = () => {
         },
         body: JSON.stringify({
           name: editName.trim(),
+          phone: editPhone.trim(),
+          email: editEmail.trim().toLowerCase(),
+          source: editSource.trim(),
+          interest: editInterest.trim(),
+          ownerId: editOwnerId.trim(),
+          ownerName: editOwnerName.trim(),
           priority: editPriority,
           notes: editNotes.trim(),
           value: Number(editValue || 0),
@@ -4835,6 +5259,23 @@ const Dashboard = () => {
     window.location.href = '/login';
   };
 
+  const salesRefactorTransitionKeepAlive = [
+    Download,
+    ProductCombobox,
+    salesTodayTotal,
+    salesMonthlyTotal,
+    bestSellingProductLabel,
+    exportSalesHistoryCsv,
+    exportDailyClosingCsv,
+    addSaleLine,
+    updateSaleLineQuantityFromInput,
+    normalizeSaleLineQuantity,
+    removeSaleLine,
+    stepSaleLineQuantity,
+    checkoutSale
+  ];
+  void salesRefactorTransitionKeepAlive;
+
   if (authLoading) {
     return (
       <main className="min-h-screen grid place-items-center bg-gray-950">
@@ -4868,8 +5309,9 @@ const Dashboard = () => {
       { name: 'Configuracoes', icon: Settings, path: 'settings', group: 'Sistema', adminOnly: true }
     ]
     : [
-      { name: 'Analise', icon: Activity, path: 'analytics', group: 'Comercial' },
-      { name: 'Vendas', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
+      { name: 'Dashboard', icon: Activity, path: 'analytics', group: 'Comercial' },
+      { name: 'CRM', icon: KanbanSquare, path: 'pipeline', group: 'Comercial' },
+      { name: 'Vendas', icon: DollarSign, path: 'sales', group: 'Comercial' },
       { name: 'Produtos', icon: Package, path: 'products', group: 'Operacao' },
       { name: 'PDV', icon: ReceiptText, path: 'pdv', group: 'Operacao' },
       { name: 'Estoque', icon: Boxes, path: 'inventory', group: 'Operacao' },
@@ -4950,7 +5392,7 @@ const Dashboard = () => {
   -H "Content-Type: application/json" \\
   -d '{
     "name": "Lead via API",
-    "status": "NOVO_CONTATO",
+    "status": "NOVO",
     "priority": "MEDIA",
     "value": 1500,
     "notes": "Criado por integracao externa"
@@ -5118,7 +5560,8 @@ const Dashboard = () => {
           isDarkTheme ? 'border-white/10 bg-gray-950/97 backdrop-blur-xl' : 'border-slate-200 bg-white shadow-lg'
         ].join(' ')}>
           {[
-            { key: 'pipeline' as const, icon: KanbanSquare, label: 'Funil' },
+            { key: 'analytics' as const, icon: Activity, label: 'Dash' },
+            { key: 'pipeline' as const, icon: KanbanSquare, label: 'CRM' },
             { key: 'sales' as const, icon: BarChart3, label: 'Vendas' },
             { key: 'products' as const, icon: Package, label: 'Produtos' },
             { key: 'inventory' as const, icon: Boxes, label: 'Estoque' },
@@ -5277,7 +5720,7 @@ const Dashboard = () => {
 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className={themedTitleClass}>Vendas</h1>
+              <h1 className={themedTitleClass}>CRM</h1>
               <p className={themedSubtextClass}>Arraste os cards entre as etapas para atualizar o status.</p>
             </div>
             <motion.button
@@ -5596,9 +6039,28 @@ const Dashboard = () => {
           </div>
 
           <div className={[themedPanelClass, 'mb-5 p-4'].join(' ')}>
-            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-8">
               <input className={themedInputClass} placeholder="Nome do cliente" value={name} onChange={(event) => setName(event.target.value)} />
-              <select className={themedSelectClass} value={formColumn || 'NOVO_CONTATO'} onChange={(event) => setFormColumn(event.target.value as LeadStatus)}>
+              <input className={themedInputClass} placeholder="Telefone" value={leadPhone} onChange={(event) => setLeadPhone(event.target.value)} />
+              <input className={themedInputClass} placeholder="Email" value={leadEmail} onChange={(event) => setLeadEmail(event.target.value)} />
+              <input className={themedInputClass} placeholder="Origem" value={leadSource} onChange={(event) => setLeadSource(event.target.value)} />
+              <input className={themedInputClass} placeholder="Interesse" value={leadInterest} onChange={(event) => setLeadInterest(event.target.value)} />
+              <select
+                className={themedSelectClass}
+                value={leadOwnerId}
+                onChange={(event) => {
+                  const ownerId = event.target.value;
+                  const owner = crmOwnerOptions.find((item) => item.id === ownerId);
+                  setLeadOwnerId(ownerId);
+                  setLeadOwnerName(owner?.name || '');
+                }}
+              >
+                <option className={themedOptionClass} value="">Responsavel</option>
+                {crmOwnerOptions.map((owner) => (
+                  <option className={themedOptionClass} key={owner.id} value={owner.id}>{owner.name}</option>
+                ))}
+              </select>
+              <select className={themedSelectClass} value={formColumn || 'NOVO'} onChange={(event) => setFormColumn(event.target.value as LeadStatus)}>
                 {columns.map((column) => (
                   <option className={themedOptionClass} key={column.key} value={column.key}>{column.label}</option>
                 ))}
@@ -5609,7 +6071,7 @@ const Dashboard = () => {
                 <option className={themedOptionClass} value="ALTA">Prioridade alta</option>
               </select>
               <input className={themedInputClass} placeholder="Valor (R$)" type="number" step="0.01" value={value} onChange={(event) => setValue(event.target.value)} />
-              <input className={[themedInputClass, 'lg:col-span-2'].join(' ')} placeholder="Observacao" value={notes} onChange={(event) => setNotes(event.target.value)} />
+              <input className={[themedInputClass, 'lg:col-span-8'].join(' ')} placeholder="Observacao" value={notes} onChange={(event) => setNotes(event.target.value)} />
             </div>
             <motion.button
               type="button"
@@ -5623,7 +6085,31 @@ const Dashboard = () => {
           </div>
 
           <div className={[themedPanelClass, 'mb-5 p-4'].join(' ')}>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Leads totais</p>
+                <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{crmMetrics?.totalLeads ?? 0}</p>
+              </article>
+              <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Ganhos vs perdidos</p>
+                <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{crmMetrics?.won ?? 0} / {crmMetrics?.lost ?? 0}</p>
+              </article>
+              <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Conversao</p>
+                <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{Number(crmMetrics?.conversionRate || 0).toFixed(1)}%</p>
+              </article>
+              <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Tempo medio fechamento</p>
+                <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{Number(crmMetrics?.avgCloseDays || 0).toFixed(1)} dias</p>
+              </article>
+              <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Top vendedor</p>
+                <p className={['mt-1 text-sm font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{crmRanking[0]?.ownerName || 'Sem dados'}</p>
+                <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{crmRanking[0]?.won || 0} ganhos</p>
+              </article>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-4">
               <select
                 className={themedSelectClass}
                 value={filterPriority}
@@ -5652,10 +6138,27 @@ const Dashboard = () => {
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
               />
+
+              <select
+                className={themedSelectClass}
+                value={filterOwnerId}
+                onChange={(event) => setFilterOwnerId(event.target.value)}
+              >
+                <option className={themedOptionClass} value="ALL">Todos responsaveis</option>
+                {crmOwnerOptions.map((owner) => (
+                  <option className={themedOptionClass} key={owner.id} value={owner.id}>{owner.name}</option>
+                ))}
+              </select>
             </div>
+            {crmMetricsLoading ? (
+              <p className={['mt-3 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                Atualizando metricas de CRM...
+              </p>
+            ) : null}
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-5">
+          <div className="grid gap-4 xl:grid-cols-[2.4fr_1.1fr]">
+            <div className="grid gap-4 xl:grid-cols-7">
             {columns.map((column) => {
               const columnLeads = board.get(column.key) || [];
 
@@ -5695,7 +6198,10 @@ const Dashboard = () => {
                         onDragEnd={onDragEnd}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={(event) => onDropOnCard(event as unknown as DragEvent<HTMLElement>, column.key, lead.id)}
-                        onClick={() => openEditModal(lead)}
+                        onClick={() => {
+                          setSelectedLeadId(lead.id);
+                          openEditModal(lead);
+                        }}
                         className={[
                           'rounded-xl border p-3 shadow-sm transition-all duration-200',
                           isDarkTheme
@@ -5710,8 +6216,13 @@ const Dashboard = () => {
                         ].join(' ')}
                       >
                         <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{lead.name}</p>
+                        <p className={['mt-1 text-[11px]', isDarkTheme ? 'text-cyan-300' : 'text-cyan-700'].join(' ')}>{lead.ownerName || 'Sem responsavel'}</p>
+                        <p className={['text-[11px]', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{lead.phone || lead.email || 'Sem contato'}</p>
                         <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Prioridade: {lead.priority}</p>
                         <p className={['mt-2 text-xs', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>{lead.notes || 'Sem observação.'}</p>
+                        {Number(lead.tasksOverdue || 0) > 0 ? (
+                          <p className="mt-2 text-xs font-semibold text-rose-500">{lead.tasksOverdue} tarefa(s) atrasada(s)</p>
+                        ) : null}
                         <p className={['mt-3 text-sm font-bold', isDarkTheme ? 'text-emerald-400' : 'text-emerald-600'].join(' ')}>{formatCurrency(Number(lead.value || 0))}</p>
                       </motion.article>
                     ))}
@@ -5732,6 +6243,101 @@ const Dashboard = () => {
                 </section>
               );
             })}
+            </div>
+
+            <aside className={themedPanelClass}>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Perfil do cliente</h3>
+                <span className={['rounded-full px-2 py-1 text-[10px] font-semibold', isDarkTheme ? 'bg-cyan-500/15 text-cyan-200' : 'bg-cyan-100 text-cyan-700'].join(' ')}>
+                  {crmProfile?.status || 'Sem selecao'}
+                </span>
+              </div>
+
+              {!selectedLeadId ? (
+                <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Selecione um card para ver o perfil completo.</p>
+              ) : crmLoading ? (
+                <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Carregando perfil...</p>
+              ) : (
+                <div className="space-y-4">
+                  <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{crmProfile?.name || 'Lead'}</p>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{crmProfile?.phone || 'Telefone nao informado'}</p>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{crmProfile?.email || 'Email nao informado'}</p>
+                    <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>Origem: {crmProfile?.source || 'Nao informada'}</p>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>Interesse: {crmProfile?.interest || 'Nao informado'}</p>
+                    <p className={['text-xs', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')}>Responsavel: {crmProfile?.ownerName || 'Nao definido'}</p>
+                    <p className={['mt-2 text-sm font-bold', isDarkTheme ? 'text-emerald-300' : 'text-emerald-700'].join(' ')}>
+                      Valor gerado: {formatCurrency(Number(crmProfile?.totalGenerated || 0))}
+                    </p>
+                  </div>
+
+                  <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <h4 className={['text-xs font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Historico</h4>
+                    <div className="mt-2 grid gap-2">
+                      <div className="grid grid-cols-[120px_1fr_auto] gap-2">
+                        <select className={themedSelectClass} value={interactionType} onChange={(event) => setInteractionType(event.target.value as CrmInteractionType)}>
+                          <option className={themedOptionClass} value="CALL">Ligacao</option>
+                          <option className={themedOptionClass} value="MESSAGE">Mensagem</option>
+                          <option className={themedOptionClass} value="MEETING">Reuniao</option>
+                          <option className={themedOptionClass} value="NOTE">Nota</option>
+                        </select>
+                        <input className={themedInputClass} placeholder="Descreva a interacao" value={interactionContent} onChange={(event) => setInteractionContent(event.target.value)} />
+                        <button type="button" onClick={handleCreateInteraction} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500">Registrar</button>
+                      </div>
+
+                      <div className="max-h-40 space-y-1 overflow-y-auto">
+                        {(crmProfile?.interactions || []).map((item) => (
+                          <article key={item.id} className={['rounded-md border px-2 py-1.5 text-xs', isDarkTheme ? 'border-white/10 bg-slate-900/60' : 'border-slate-200 bg-white'].join(' ')}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{item.type}</span>
+                              <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>{formatDateTime(item.happenedAt)}</span>
+                            </div>
+                            <p className={isDarkTheme ? 'text-slate-200' : 'text-slate-700'}>{item.content}</p>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <h4 className={['text-xs font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Tarefas</h4>
+                    <div className="mt-2 grid gap-2">
+                      <div className="grid grid-cols-1 gap-2">
+                        <input className={themedInputClass} placeholder="Titulo da tarefa" value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
+                        <div className="grid grid-cols-[1fr_140px_auto] gap-2">
+                          <input className={themedInputClass} type="date" value={taskDueDate} onChange={(event) => setTaskDueDate(event.target.value)} />
+                          <select className={themedSelectClass} value={taskPriority} onChange={(event) => setTaskPriority(event.target.value as CrmTaskPriority)}>
+                            <option className={themedOptionClass} value="BAIXA">Baixa</option>
+                            <option className={themedOptionClass} value="MEDIA">Media</option>
+                            <option className={themedOptionClass} value="ALTA">Alta</option>
+                          </select>
+                          <button type="button" onClick={handleCreateTask} className="rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500">Criar</button>
+                        </div>
+                      </div>
+
+                      <div className="max-h-44 space-y-1 overflow-y-auto">
+                        {(crmProfile?.tasks || []).map((task) => {
+                          const isOverdue = task.status === 'PENDENTE' && new Date(task.dueDate).getTime() < Date.now();
+
+                          return (
+                            <article key={task.id} className={['rounded-md border px-2 py-1.5 text-xs', isOverdue ? 'border-rose-300 bg-rose-50' : isDarkTheme ? 'border-white/10 bg-slate-900/60' : 'border-slate-200 bg-white'].join(' ')}>
+                              <div className="flex items-center justify-between gap-2">
+                                <p className={isDarkTheme ? 'text-slate-200' : 'text-slate-700'}>{task.title}</p>
+                                <button type="button" onClick={() => void toggleTaskStatus(task)} className={['rounded-md px-2 py-0.5 font-semibold', task.status === 'CONCLUIDA' ? 'bg-emerald-500/20 text-emerald-700' : 'bg-amber-500/20 text-amber-700'].join(' ')}>
+                                  {task.status}
+                                </button>
+                              </div>
+                              <p className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>Prazo: {formatDateTime(task.dueDate)}</p>
+                              {isOverdue ? <p className="text-rose-600 font-semibold">Atrasada</p> : null}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </aside>
           </div>
 
           <p className="mt-4 text-sm text-slate-500">{status}</p>
@@ -6823,27 +7429,37 @@ const Dashboard = () => {
           ) : null}
 
           {activeView === 'sales' ? (
-            <div className="grid gap-6">
+            <div className="grid gap-5">
               <div className={[
-                'rounded-2xl p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg',
-                isDarkTheme
-                  ? 'border border-white/10 bg-white/5 shadow-cyan-900/20 backdrop-blur-md'
-                  : 'border border-slate-200 bg-white'
+                'rounded-3xl border p-5',
+                isDarkTheme ? 'border-white/10 bg-slate-950/70' : 'border-slate-200 bg-white'
               ].join(' ')}>
-                <div className="flex items-center gap-2">
-                  <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-800'].join(' ')}>Vendas</h1>
-                  <HelpTooltip text={beginnerHelpByView.sales.tooltip} isDarkTheme={isDarkTheme} />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className={['text-2xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>Vendas</h1>
+                      <HelpTooltip text={beginnerHelpByView.sales.tooltip} isDarkTheme={isDarkTheme} />
+                    </div>
+                    <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Registro real das vendas do PDV com filtros e detalhe por venda.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void fetchSalesAnalysis()}
+                    disabled={salesLoading}
+                    className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60' : 'rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60'}
+                  >
+                    {salesLoading ? 'Atualizando...' : 'Atualizar dados'}
+                  </button>
                 </div>
-                <p className={['mt-1 text-sm', isDarkTheme ? 'text-slate-300' : 'text-slate-500'].join(' ')}>Sistema completo de vendas com CRM + PDV: seleção de produtos, carrinho, cliente opcional, pagamento e histórico.</p>
 
                 {role === 'ADMIN' ? (
                   <div className="mt-4 max-w-sm">
                     <select
                       className={[
-                        'w-full rounded-xl px-3 py-2 text-sm outline-none transition-all focus:border-blue-400',
-                        isDarkTheme
-                          ? 'border border-white/10 bg-white/5 text-slate-100 focus:ring-2 focus:ring-cyan-500/40'
-                          : 'border border-slate-200 bg-slate-50'
+                        'w-full rounded-xl px-3 py-2 text-sm outline-none',
+                        isDarkTheme ? 'border border-white/10 bg-white/5 text-slate-100' : 'border border-slate-200 bg-slate-50'
                       ].join(' ')}
                       value={salesCompanyId}
                       onChange={(event) => setSalesCompanyId(event.target.value)}
@@ -6858,424 +7474,159 @@ const Dashboard = () => {
                 ) : null}
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Vendas hoje</p>
-                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{formatCurrency(salesTodayTotal)}</p>
+                  <article className={['rounded-2xl border p-4', isDarkTheme ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Receita total</p>
+                    <p className={['mt-2 text-xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{formatCurrency(Number(salesAnalysis?.totalRevenue || 0))}</p>
                   </article>
-                  <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Vendas no mês</p>
-                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{formatCurrency(salesMonthlyTotal)}</p>
+                  <article className={['rounded-2xl border p-4', isDarkTheme ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Total de vendas</p>
+                    <p className={['mt-2 text-xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{Number(salesAnalysis?.totalSales || 0)}</p>
                   </article>
-                  <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
+                  <article className={['rounded-2xl border p-4', isDarkTheme ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'].join(' ')}>
                     <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Ticket médio</p>
-                    <p className={['mt-1 text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{formatCurrency(Number(salesAnalysis?.averageTicket || 0))}</p>
+                    <p className={['mt-2 text-xl font-black', isDarkTheme ? 'text-white' : 'text-slate-900'].join(' ')}>{formatCurrency(Number(salesAnalysis?.averageTicket || 0))}</p>
                   </article>
-                  <article className={['rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Produto destaque</p>
-                    <p className={['mt-1 truncate text-lg font-black', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{bestSellingProductLabel}</p>
+                  <article className={['rounded-2xl border p-4', isDarkTheme ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                    <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Lucro</p>
+                    <p className={['mt-2 text-xl font-black', salesProfitTotal >= 0 ? 'text-emerald-500' : 'text-rose-500'].join(' ')}>{formatCurrency(salesProfitTotal)}</p>
                   </article>
                 </div>
-
-                <div className="mt-5 grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-                  <section className={['rounded-2xl p-4', isDarkTheme ? 'border border-white/10 bg-black/20' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Seleção de produtos</h3>
-                      <motion.button
-                        type="button"
-                        whileHover={{ y: -2 }}
-                        whileTap={{ scale: 0.96 }}
-                        onClick={addSaleLine}
-                        className={isDarkTheme ? 'rounded-xl border border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/25' : 'rounded-xl border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100'}
-                      >
-                        + Adicionar item
-                      </motion.button>
-                    </div>
-
-                    <div className="grid gap-3">
-                      {saleLines.map((line) => (
-                        <motion.div
-                          key={line.id}
-                          layout
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="grid gap-2 md:grid-cols-[1fr_190px_auto]"
-                        >
-                          <ProductCombobox
-                            products={products}
-                            value={line.productId}
-                            onChange={(productId) => updateSaleLine(line.id, { productId })}
-                            isDarkTheme={isDarkTheme}
-                          />
-
-                          <div className={['flex items-center gap-2 rounded-xl px-2', isDarkTheme ? 'border border-white/10 bg-white/5' : 'border border-slate-200 bg-white'].join(' ')}>
-                            <button
-                              type="button"
-                              onClick={() => stepSaleLineQuantity(line.id, -1)}
-                              className={isDarkTheme ? 'rounded-lg px-2 py-1 text-slate-200 hover:bg-white/10' : 'rounded-lg px-2 py-1 text-slate-700 hover:bg-slate-100'}
-                            >
-                              -
-                            </button>
-                            <input
-                              className={[
-                                'w-full bg-transparent px-2 py-2 text-center text-sm outline-none',
-                                isDarkTheme ? 'text-slate-100' : 'text-slate-800'
-                              ].join(' ')}
-                              type="text"
-                              inputMode="numeric"
-                              pattern="[0-9]*"
-                              value={line.quantity}
-                              onChange={(event) => updateSaleLineQuantityFromInput(line.id, event.target.value)}
-                              onBlur={() => normalizeSaleLineQuantity(line.id, line.quantity)}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => stepSaleLineQuantity(line.id, 1)}
-                              className={isDarkTheme ? 'rounded-lg px-2 py-1 text-slate-200 hover:bg-white/10' : 'rounded-lg px-2 py-1 text-slate-700 hover:bg-slate-100'}
-                            >
-                              +
-                            </button>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => removeSaleLine(line.id)}
-                            className={[
-                              'rounded-xl px-3 py-2 text-sm font-semibold transition-all duration-300 hover:-translate-y-0.5',
-                              isDarkTheme
-                                ? 'border border-white/15 text-slate-200 hover:bg-white/10'
-                                : 'border border-slate-300 text-slate-700 hover:bg-slate-100'
-                            ].join(' ')}
-                          >
-                            Remover
-                          </button>
-                        </motion.div>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className={['rounded-2xl p-4', isDarkTheme ? 'border border-cyan-400/25 bg-gradient-to-b from-slate-900/80 to-slate-950/80' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Carrinho</h3>
-
-                    <div className="mt-3 space-y-2">
-                      <AnimatePresence initial={false}>
-                        {salesCartItems.map((item) => (
-                          <motion.article
-                            key={item.lineId}
-                            layout
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -8 }}
-                            className={['rounded-xl border px-3 py-2 text-sm', isDarkTheme ? 'border-white/10 bg-black/20 text-slate-100' : 'border-slate-200 bg-white text-slate-700'].join(' ')}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="truncate font-semibold">{item.product?.name}</p>
-                              <p className={isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'}>{formatCurrency(item.lineTotal)}</p>
-                            </div>
-                            <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                              Qtd: {item.quantity} • Unitário: {formatCurrency(item.price)}
-                            </p>
-                          </motion.article>
-                        ))}
-                      </AnimatePresence>
-
-                      {!salesCartItems.length ? (
-                        <p className={['rounded-xl border border-dashed px-3 py-4 text-center text-xs', isDarkTheme ? 'border-white/10 text-slate-400' : 'border-slate-300 text-slate-500'].join(' ')}>
-                          Nenhum item adicionado ao carrinho.
-                        </p>
-                      ) : null}
-                    </div>
-
-                    <div className={['mt-3 rounded-xl p-3', isDarkTheme ? 'border border-cyan-400/20 bg-cyan-500/10' : 'border border-cyan-200 bg-cyan-50'].join(' ')}>
-                      <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-cyan-200/80' : 'text-cyan-700'].join(' ')}>Total em tempo real</p>
-                      <p className={['mt-1 text-2xl font-black', isDarkTheme ? 'text-cyan-100' : 'text-cyan-800'].join(' ')}>{formatCurrency(salesCartTotal)}</p>
-                    </div>
-
-                    <div className="mt-3 grid gap-2">
-                      <select
-                        value={saleCustomerId}
-                        onChange={(event) => setSaleCustomerId(event.target.value)}
-                        className={[
-                          'rounded-xl px-3 py-2 text-sm outline-none',
-                          isDarkTheme
-                            ? 'border border-white/10 bg-white/5 text-slate-100'
-                            : 'border border-slate-200 bg-white text-slate-700'
-                        ].join(' ')}
-                      >
-                        <option value="quick-sale">Venda rápida (sem cliente)</option>
-                        {salesCustomerOptions.map((customer) => (
-                          <option key={customer.id} value={customer.id}>{customer.name}</option>
-                        ))}
-                      </select>
-
-                      <div className="grid grid-cols-3 gap-2">
-                        {([
-                          { key: 'cash' as const, label: 'Dinheiro' },
-                          { key: 'pix' as const, label: 'Pix' },
-                          { key: 'card' as const, label: 'Cartão' }
-                        ]).map((method) => (
-                          <button
-                            key={method.key}
-                            type="button"
-                            onClick={() => setSalePaymentMethod(method.key)}
-                            className={[
-                              'rounded-xl border px-2 py-2 text-xs font-semibold transition-all',
-                              salePaymentMethod === method.key
-                                ? isDarkTheme
-                                  ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200'
-                                  : 'border-blue-300 bg-blue-50 text-blue-700'
-                                : isDarkTheme
-                                  ? 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
-                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                            ].join(' ')}
-                          >
-                            {method.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {salePaymentMethod === 'cash' ? (
-                        <div className={['rounded-xl border px-3 py-3', isDarkTheme ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white'].join(' ')}>
-                          <label className={['text-xs font-semibold uppercase tracking-wide', isDarkTheme ? 'text-slate-300' : 'text-slate-600'].join(' ')} htmlFor="sale-amount-received">
-                            Valor recebido
-                          </label>
-                          <input
-                            id="sale-amount-received"
-                            value={saleAmountReceivedInput}
-                            onChange={(event) => setSaleAmountReceivedInput(normalizeMoneyInput(event.target.value))}
-                            inputMode="decimal"
-                            placeholder="0.00"
-                            className={[
-                              'mt-2 w-full rounded-xl px-3 py-2 text-sm outline-none',
-                              isDarkTheme
-                                ? 'border border-white/10 bg-white/5 text-slate-100 placeholder-slate-500'
-                                : 'border border-slate-200 bg-white text-slate-700 placeholder-slate-400'
-                            ].join(' ')}
-                          />
-                          <div className="mt-2 grid gap-1 text-xs">
-                            <p className={isDarkTheme ? 'text-cyan-200/90' : 'text-cyan-700'}>
-                              Troco: {formatCurrency(saleChangeDue)}
-                            </p>
-                            {saleMissingAmount > 0 ? (
-                              <p className={isDarkTheme ? 'text-rose-300' : 'text-rose-600'}>
-                                Falta: {formatCurrency(saleMissingAmount)}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <button
-                        type="button"
-                        onClick={checkoutSale}
-                        disabled={salesLoading || !salesCartItems.length}
-                        className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-70"
-                      >
-                        {salesLoading ? 'Finalizando...' : 'Finalizar venda'}
-                      </button>
-                    </div>
-                  </section>
-                </div>
-
-                <section className={['mt-5 rounded-2xl p-4', isDarkTheme ? 'border border-white/10 bg-black/20' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Histórico de vendas</h3>
-                    <div className="flex flex-wrap gap-2">
-                      <input
-                        value={saleHistorySearch}
-                        onChange={(event) => setSaleHistorySearch(event.target.value)}
-                        placeholder="Buscar cliente, ID, pagamento ou valor"
-                        className={[
-                          'rounded-xl px-3 py-2 text-sm outline-none',
-                          isDarkTheme
-                            ? 'border border-white/10 bg-white/5 text-slate-100 placeholder-slate-500'
-                            : 'border border-slate-200 bg-white text-slate-700 placeholder-slate-400'
-                        ].join(' ')}
-                      />
-                      <select
-                        value={saleHistoryStatusFilter}
-                        onChange={(event) => setSaleHistoryStatusFilter(event.target.value as 'ALL' | 'CONCLUIDA')}
-                        className={[
-                          'rounded-xl px-3 py-2 text-sm outline-none',
-                          isDarkTheme
-                            ? 'border border-white/10 bg-white/5 text-slate-100'
-                            : 'border border-slate-200 bg-white text-slate-700'
-                        ].join(' ')}
-                      >
-                        <option value="ALL">Todos os status</option>
-                        <option value="CONCLUIDA">Concluída</option>
-                      </select>
-                      <select
-                        value={saleHistoryPaymentFilter}
-                        onChange={(event) => setSaleHistoryPaymentFilter(event.target.value as 'ALL' | 'cash' | 'pix' | 'card')}
-                        className={[
-                          'rounded-xl px-3 py-2 text-sm outline-none',
-                          isDarkTheme
-                            ? 'border border-white/10 bg-white/5 text-slate-100'
-                            : 'border border-slate-200 bg-white text-slate-700'
-                        ].join(' ')}
-                      >
-                        <option value="ALL">Todos os pagamentos</option>
-                        <option value="cash">Dinheiro</option>
-                        <option value="pix">Pix</option>
-                        <option value="card">Cartão</option>
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => void fetchSalesAnalysis()}
-                        disabled={salesLoading}
-                        className={isDarkTheme ? 'rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-60' : 'rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60'}
-                      >
-                        Atualizar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={exportSalesHistoryCsv}
-                        className={isDarkTheme ? 'inline-flex items-center gap-1 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20' : 'inline-flex items-center gap-1 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700 hover:bg-cyan-100'}
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                        Exportar historico
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[620px] text-sm">
-                      <thead>
-                        <tr className={isDarkTheme ? 'text-slate-300' : 'text-slate-600'}>
-                          <th className="px-3 py-2 text-left">Cliente</th>
-                          <th className="px-3 py-2 text-left">Valor total</th>
-                          <th className="px-3 py-2 text-left">Pagamento</th>
-                          <th className="px-3 py-2 text-left">Data</th>
-                          <th className="px-3 py-2 text-left">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredSalesHistoryRows.map((sale) => (
-                          <tr key={sale.id} className={isDarkTheme ? 'border-t border-white/10' : 'border-t border-slate-200'}>
-                            <td className="px-3 py-3">{sale.customer}</td>
-                            <td className="px-3 py-3 font-semibold">{formatCurrency(sale.total)}</td>
-                            <td className="px-3 py-3">
-                              <div className="flex flex-col gap-0.5">
-                                <span>{sale.paymentMethod}</span>
-                                {sale.amountReceived > 0 ? (
-                                  <span className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                                    Recebido: {formatCurrency(sale.amountReceived)}
-                                  </span>
-                                ) : null}
-                                {sale.changeDue > 0 ? (
-                                  <span className={['text-xs font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-cyan-700'].join(' ')}>
-                                    Troco: {formatCurrency(sale.changeDue)}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </td>
-                            <td className="px-3 py-3">{formatDateTime(sale.createdAt)}</td>
-                            <td className="px-3 py-3">
-                              <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-300">{sale.status}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-
-                    {!filteredSalesHistoryRows.length ? (
-                      <p className={['px-3 py-5 text-center text-sm', isDarkTheme ? 'text-slate-500' : 'text-slate-500'].join(' ')}>
-                        Nenhuma venda encontrada com os filtros atuais.
-                      </p>
-                    ) : null}
-                  </div>
-                </section>
               </div>
 
               <div className={[
-                'rounded-2xl p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg',
-                isDarkTheme
-                  ? 'border border-cyan-400/20 bg-gradient-to-br from-slate-950 via-slate-900 to-[#0a122b] shadow-[0_0_40px_rgba(34,211,238,0.08)]'
-                  : 'border border-slate-200 bg-white'
+                'rounded-3xl border p-5',
+                isDarkTheme ? 'border-white/10 bg-slate-950/70' : 'border-slate-200 bg-white'
               ].join(' ')}>
-                <h2 className={['text-lg font-bold', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>Analise de vendas e estoque</h2>
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  <div className={['rounded-xl p-3 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5 hover:bg-white/10' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Faturamento</p>
-                    <p className={['mt-1 text-lg font-bold', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{formatCurrency(Number(salesAnalysis?.totalRevenue || 0))}</p>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <input
+                    type="date"
+                    value={saleHistoryStartDate}
+                    onChange={(event) => setSaleHistoryStartDate(event.target.value)}
+                    className={themedInputClass}
+                  />
+                  <input
+                    type="date"
+                    value={saleHistoryEndDate}
+                    onChange={(event) => setSaleHistoryEndDate(event.target.value)}
+                    className={themedInputClass}
+                  />
+                  <input
+                    value={saleHistorySearch}
+                    onChange={(event) => setSaleHistorySearch(event.target.value)}
+                    placeholder="Filtrar por cliente"
+                    className={themedInputClass}
+                  />
+                  <select
+                    value={saleHistoryPaymentFilter}
+                    onChange={(event) => setSaleHistoryPaymentFilter(event.target.value as 'ALL' | 'cash' | 'pix' | 'card')}
+                    className={themedSelectClass}
+                  >
+                    <option className={themedOptionClass} value="ALL">Todos pagamentos</option>
+                    <option className={themedOptionClass} value="cash">Dinheiro</option>
+                    <option className={themedOptionClass} value="pix">Pix</option>
+                    <option className={themedOptionClass} value="card">Cartão</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[1.9fr_1fr]">
+                <div className={[
+                  'rounded-3xl border p-0 overflow-hidden',
+                  isDarkTheme ? 'border-white/10 bg-slate-950/70' : 'border-slate-200 bg-white'
+                ].join(' ')}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[960px] text-sm">
+                      <thead className={isDarkTheme ? 'bg-white/5 text-slate-300' : 'bg-slate-50 text-slate-600'}>
+                        <tr>
+                          <th className="px-4 py-3 text-left">ID</th>
+                          <th className="px-4 py-3 text-left">Data</th>
+                          <th className="px-4 py-3 text-left">Cliente</th>
+                          <th className="px-4 py-3 text-left">Caixa</th>
+                          <th className="px-4 py-3 text-left">Operador</th>
+                          <th className="px-4 py-3 text-left">Forma de pagamento</th>
+                          <th className="px-4 py-3 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredSalesHistoryRows.map((sale) => {
+                          const isSelected = selectedSaleId === sale.id;
+
+                          return (
+                            <tr
+                              key={sale.id}
+                              onClick={() => setSelectedSaleId(sale.id)}
+                              className={[
+                                'cursor-pointer border-t transition-colors',
+                                isDarkTheme ? 'border-white/10 hover:bg-white/5' : 'border-slate-200 hover:bg-slate-50',
+                                isSelected ? (isDarkTheme ? 'bg-cyan-500/10' : 'bg-cyan-50') : ''
+                              ].join(' ')}
+                            >
+                              <td className="px-4 py-3 font-mono text-xs">{sale.id.slice(0, 8)}</td>
+                              <td className="px-4 py-3">{formatDateTime(sale.date)}</td>
+                              <td className="px-4 py-3">{sale.customer}</td>
+                              <td className="px-4 py-3">{sale.cashier}</td>
+                              <td className="px-4 py-3">{sale.operator}</td>
+                              <td className="px-4 py-3">{sale.paymentMethod}</td>
+                              <td className="px-4 py-3 text-right font-semibold">{formatCurrency(sale.total)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className={['rounded-xl p-3 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5 hover:bg-white/10' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Total de vendas</p>
-                    <p className={['mt-1 text-lg font-bold', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{Number(salesAnalysis?.totalSales || 0)}</p>
-                  </div>
-                  <div className={['rounded-xl p-3 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5 hover:bg-white/10' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Ticket medio</p>
-                    <p className={['mt-1 text-lg font-bold', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{formatCurrency(Number(salesAnalysis?.averageTicket || 0))}</p>
-                  </div>
-                  <div className={['rounded-xl p-3 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5 hover:bg-white/10' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Unidades em estoque</p>
-                    <p className={['mt-1 text-lg font-bold', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{Number(salesAnalysis?.totalStockUnits || 0)}</p>
-                  </div>
-                  <div className={['rounded-xl p-3 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5 hover:bg-white/10' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                    <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Produtos cadastrados</p>
-                    <p className={['mt-1 text-lg font-bold', isDarkTheme ? 'text-cyan-200' : 'text-slate-800'].join(' ')}>{Number(salesAnalysis?.productsCount || 0)}</p>
-                  </div>
+
+                  {!filteredSalesHistoryRows.length ? (
+                    <p className={['px-4 py-8 text-center text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Nenhuma venda encontrada com os filtros informados.
+                    </p>
+                  ) : null}
                 </div>
 
-                <div className={['mt-4 rounded-xl p-4 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Fechamento diário por pagamento</h3>
-                    <button
-                      type="button"
-                      onClick={exportDailyClosingCsv}
-                      className={isDarkTheme ? 'inline-flex items-center gap-1 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20' : 'inline-flex items-center gap-1 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-100'}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Exportar fechamento
-                    </button>
-                  </div>
-                  <div className="mt-3 grid gap-2 md:grid-cols-3">
-                    {salesTodayByPayment.map((entry) => (
-                      <div
-                        key={entry.method}
-                        className={[
-                          'rounded-lg border px-3 py-2 text-sm',
-                          isDarkTheme
-                            ? 'border-white/10 bg-slate-900/70 text-slate-100'
-                            : 'border-slate-200 bg-white text-slate-700'
-                        ].join(' ')}
-                      >
-                        <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>{entry.label}</p>
-                        <p className="mt-1 font-semibold">{entry.salesCount} venda(s)</p>
-                        <p className={['mt-1 text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                          Total: {formatCurrency(entry.total)}
-                        </p>
-                        <p className={['text-xs', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
-                          Recebido: {formatCurrency(entry.amountReceived)}
-                        </p>
-                        {entry.changeGiven > 0 ? (
-                          <p className={['text-xs font-semibold', isDarkTheme ? 'text-cyan-300' : 'text-cyan-700'].join(' ')}>
-                            Troco: {formatCurrency(entry.changeGiven)}
-                          </p>
-                        ) : null}
+                <aside className={[
+                  'rounded-3xl border p-5',
+                  isDarkTheme ? 'border-white/10 bg-slate-950/70' : 'border-slate-200 bg-white'
+                ].join(' ')}>
+                  <h3 className={['text-sm font-bold uppercase tracking-wide', isDarkTheme ? 'text-cyan-200' : 'text-slate-700'].join(' ')}>
+                    Detalhe da venda
+                  </h3>
+
+                  {!selectedSale ? (
+                    <p className={['mt-4 text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>
+                      Selecione uma venda na tabela para ver os itens.
+                    </p>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      <div className={['rounded-xl border p-3 text-xs', isDarkTheme ? 'border-white/10 bg-white/5 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'].join(' ')}>
+                        <p><strong>ID:</strong> {selectedSale.id}</p>
+                        <p><strong>Cliente:</strong> {selectedSale.customer}</p>
+                        <p><strong>Data:</strong> {formatDateTime(selectedSale.createdAt)}</p>
+                        <p><strong>Pagamento:</strong> {selectedSale.paymentMethod}</p>
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-                <div className={['mt-4 rounded-xl p-4 transition-all', isDarkTheme ? 'border border-cyan-400/20 bg-white/5' : 'border border-slate-200 bg-slate-50'].join(' ')}>
-                  <h3 className={['text-sm font-bold', isDarkTheme ? 'text-cyan-100' : 'text-slate-700'].join(' ')}>Estoque baixo (ate 5)</h3>
-                  <div className="mt-3 grid gap-2">
-                    {(salesAnalysis?.lowStockProducts || []).length ? (
-                      salesAnalysis?.lowStockProducts.map((product) => (
-                        <div key={product.id} className={['flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-all', isDarkTheme ? 'bg-slate-900/70 border border-white/10' : 'bg-white'].join(' ')}>
-                          <span className={['font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-700'].join(' ')}>{product.name}</span>
-                          <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-500'}>Codigo: {product.code}</span>
-                          <span className="text-rose-600 font-semibold">Qtd: {product.quantity}</span>
-                          <span className={isDarkTheme ? 'text-slate-100' : 'text-slate-700'}>{formatCurrency(product.price)}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className={['text-sm', isDarkTheme ? 'text-slate-400' : 'text-slate-500'].join(' ')}>Nenhum produto com estoque baixo.</p>
-                    )}
-                  </div>
-                </div>
+                      <div className="space-y-2">
+                        {selectedSale.items.length ? selectedSale.items.map((item) => (
+                          <article key={`${selectedSale.id}-${item.productId}-${item.name}`} className={['rounded-xl border p-3', isDarkTheme ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-slate-50'].join(' ')}>
+                            <p className={['text-sm font-semibold', isDarkTheme ? 'text-slate-100' : 'text-slate-800'].join(' ')}>{item.name}</p>
+                            <div className="mt-1 grid grid-cols-3 gap-2 text-xs">
+                              <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-600'}>Qtd: {item.quantity}</span>
+                              <span className={isDarkTheme ? 'text-slate-400' : 'text-slate-600'}>Preço: {formatCurrency(item.unitPrice)}</span>
+                              <span className={['text-right font-semibold', isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'].join(' ')}>{formatCurrency(item.total)}</span>
+                            </div>
+                          </article>
+                        )) : (
+                          <p className={['rounded-xl border border-dashed px-3 py-4 text-center text-xs', isDarkTheme ? 'border-white/10 text-slate-400' : 'border-slate-300 text-slate-500'].join(' ')}>
+                            Esta venda nao possui itens detalhados disponiveis.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className={['rounded-xl border p-3', isDarkTheme ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-cyan-200 bg-cyan-50'].join(' ')}>
+                        <p className={['text-xs uppercase tracking-wide', isDarkTheme ? 'text-cyan-200' : 'text-cyan-700'].join(' ')}>Total da venda</p>
+                        <p className={['mt-1 text-xl font-black', isDarkTheme ? 'text-cyan-100' : 'text-cyan-800'].join(' ')}>{formatCurrency(selectedSale.total)}</p>
+                      </div>
+                    </div>
+                  )}
+                </aside>
               </div>
             </div>
           ) : null}
@@ -7616,6 +7967,25 @@ const Dashboard = () => {
 
               <div className="mt-4 grid gap-3">
                 <input className={themedInputClass} placeholder="Nome" value={editName} onChange={(event) => setEditName(event.target.value)} />
+                <input className={themedInputClass} placeholder="Telefone" value={editPhone} onChange={(event) => setEditPhone(event.target.value)} />
+                <input className={themedInputClass} placeholder="Email" value={editEmail} onChange={(event) => setEditEmail(event.target.value)} />
+                <input className={themedInputClass} placeholder="Origem" value={editSource} onChange={(event) => setEditSource(event.target.value)} />
+                <input className={themedInputClass} placeholder="Interesse" value={editInterest} onChange={(event) => setEditInterest(event.target.value)} />
+                <select
+                  className={themedSelectClass}
+                  value={editOwnerId}
+                  onChange={(event) => {
+                    const ownerId = event.target.value;
+                    const owner = crmOwnerOptions.find((item) => item.id === ownerId);
+                    setEditOwnerId(ownerId);
+                    setEditOwnerName(owner?.name || '');
+                  }}
+                >
+                  <option className={themedOptionClass} value="">Responsavel</option>
+                  {crmOwnerOptions.map((owner) => (
+                    <option className={themedOptionClass} key={owner.id} value={owner.id}>{owner.name}</option>
+                  ))}
+                </select>
                 <select className={themedSelectClass} value={editPriority} onChange={(event) => setEditPriority(event.target.value as LeadPriority)}>
                   <option className={themedOptionClass} value="BAIXA">Prioridade baixa</option>
                   <option className={themedOptionClass} value="MEDIA">Prioridade média</option>

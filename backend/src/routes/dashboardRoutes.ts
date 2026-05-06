@@ -26,6 +26,21 @@ import {
   replaceCompanyIntegrationWebhooks,
   type CustomIntegrationEvent
 } from '../services/customIntegrationService';
+import {
+  addLeadInteraction,
+  createLeadTask,
+  deleteLeadTask,
+  getLeadCrmBundle,
+  listCompanyCrmRecords,
+  listLeadInteractions,
+  listLeadTasks,
+  removeLeadCrmRecord,
+  updateLeadTask,
+  upsertLeadDetails,
+  type CrmInteractionType,
+  type CrmTaskPriority,
+  type CrmTaskStatus
+} from '../services/crmDataService';
 
 const router = Router();
 
@@ -50,12 +65,20 @@ const saleChangeDueFieldAliases = ['change_due', 'changeDue'];
 const saleCustomerNameFieldAliases = ['customer_name', 'customerName'];
 const saleIdFieldAliases = ['sale_id', 'saleId'];
 const leadStatuses = [
-  'NOVO_CONTATO',
-  'EM_CONTATO',
-  'APRESENTACAO',
+  'NOVO',
+  'CONTATO',
+  'QUALIFICADO',
+  'PROPOSTA',
   'NEGOCIACAO',
-  'FECHAMENTO'
+  'FECHADO',
+  'PERDIDO'
 ] as const;
+const legacyLeadStatusMap: Record<string, LeadStatus> = {
+  NOVO_CONTATO: 'NOVO',
+  EM_CONTATO: 'CONTATO',
+  APRESENTACAO: 'QUALIFICADO',
+  FECHAMENTO: 'FECHADO'
+};
 const leadPriorities = ['BAIXA', 'MEDIA', 'ALTA'] as const;
 const supportStatuses = ['PENDING', 'IN_REVIEW', 'DONE'] as const;
 type LeadStatus = (typeof leadStatuses)[number];
@@ -106,6 +129,25 @@ type SaleItemRow = {
 
 const checkoutPaymentMethods = ['cash', 'pix', 'card'] as const;
 type CheckoutPaymentMethod = (typeof checkoutPaymentMethods)[number];
+const crmInteractionTypes = ['CALL', 'MESSAGE', 'MEETING', 'SALE', 'NOTE'] as const;
+const crmTaskPriorities = ['BAIXA', 'MEDIA', 'ALTA'] as const;
+const crmTaskStatuses = ['PENDENTE', 'CONCLUIDA'] as const;
+
+const normalizeLeadStatus = (rawStatus: unknown): LeadStatus | null => {
+  const normalized = String(rawStatus || '').trim().toUpperCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const direct = leadStatuses.find((status) => status === normalized);
+
+  if (direct) {
+    return direct;
+  }
+
+  return legacyLeadStatusMap[normalized] || null;
+};
 
 const getSupportMessagesWithAliases = async (companyId: string, requestId?: string | null) => {
   for (const tableName of tableAliases.messages) {
@@ -2091,6 +2133,43 @@ router.post('/sales/checkout', requireAuth, async (req, res) => {
     }))
   });
 
+  if (customerName) {
+    const leadsScoped = await getScopedData('leads', {
+      id: req.authUser.id,
+      email: req.authUser.email,
+      role: 'CLIENT',
+      companyId
+    });
+
+    const matchedLead = (leadsScoped.data || []).find((lead) => {
+      const row = lead as Record<string, unknown>;
+      const leadName = String(row.name || '').trim().toLowerCase();
+      return leadName && leadName === String(customerName).trim().toLowerCase();
+    }) as Record<string, unknown> | undefined;
+
+    if (matchedLead) {
+      const leadId = String(matchedLead.id || '').trim();
+
+      if (leadId) {
+        await addLeadInteraction(companyId, leadId, {
+          type: 'SALE',
+          content: `Venda registrada no PDV: ${roundedTotal.toFixed(2)} (${paymentMethod}).`,
+          happenedAt: new Date().toISOString(),
+          createdById: req.authUser.id,
+          createdByName: req.authUser.email.split('@')[0] || 'Usuario'
+        });
+
+        const currentStatus = normalizeLeadStatus(matchedLead.status);
+
+        if (currentStatus && currentStatus !== 'FECHADO') {
+          await updateLeadWithAliases(leadId, companyId, {
+            status: 'FECHADO'
+          });
+        }
+      }
+    }
+  }
+
   return res.status(201).json({
     message: 'Venda finalizada com sucesso e estoque atualizado.',
     sale: saleRecord,
@@ -2198,6 +2277,55 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
       price: Number(product.price || 0)
     }));
 
+  const productByIdForSales = new Map<string, Record<string, unknown>>();
+
+  for (const product of products) {
+    const productId = String(product.id || '').trim();
+
+    if (!productId) {
+      continue;
+    }
+
+    productByIdForSales.set(productId, product);
+  }
+
+  const saleItemsBySaleId = new Map<string, Array<{
+    productId: string;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    total: number;
+    unitCost: number;
+    estimatedCost: number;
+  }>>();
+
+  for (const item of saleItems) {
+    const saleId = String(item.saleId || '').trim();
+    const productId = String(item.productId || '').trim();
+
+    if (!saleId || !productId) {
+      continue;
+    }
+
+    const product = productByIdForSales.get(productId);
+    const quantity = Number.isFinite(item.quantity) ? item.quantity : 0;
+    const unitPrice = Number.isFinite(item.unitPrice) ? item.unitPrice : 0;
+    const unitCostRaw = Number(product?.cost || 0);
+    const unitCost = Number.isFinite(unitCostRaw) ? unitCostRaw : 0;
+
+    const current = saleItemsBySaleId.get(saleId) || [];
+    current.push({
+      productId,
+      name: String(product?.name || 'Produto sem nome').trim() || 'Produto sem nome',
+      quantity,
+      unitPrice,
+      total: quantity * unitPrice,
+      unitCost,
+      estimatedCost: quantity * unitCost
+    });
+    saleItemsBySaleId.set(saleId, current);
+  }
+
   const recentSales = [...sales]
     .sort((left, right) => {
       const leftTime = new Date(String(left.created_at || left.createdAt || 0)).getTime();
@@ -2205,16 +2333,23 @@ router.get('/sales/analysis', requireAuth, async (req, res) => {
       return rightTime - leftTime;
     })
     .slice(0, 20)
-    .map((sale) => ({
-      id: String(sale.id || ''),
+    .map((sale) => {
+      const saleId = String(sale.id || '');
+
+      return {
+      id: saleId,
       total: Number(sale.total || 0),
       userId: String(sale.user_id || sale.userId || '').trim() || null,
+      operatorName: String(sale.operator_name || sale.operatorName || sale.user_name || sale.userName || '').trim() || null,
+      cashierName: String(sale.caixa || sale.cashier || sale.register_name || sale.registerName || '').trim() || null,
       customerName: String(sale.customer_name || sale.customerName || '').trim() || null,
       paymentMethod: String(sale.payment_method || sale.paymentMethod || '').trim().toLowerCase() || null,
       amountReceived: Number(sale.amount_received || sale.amountReceived || 0) || 0,
       changeDue: Number(sale.change_due || sale.changeDue || 0) || 0,
-      createdAt: String(sale.created_at || sale.createdAt || new Date().toISOString())
-    }));
+      createdAt: String(sale.created_at || sale.createdAt || new Date().toISOString()),
+      items: saleItemsBySaleId.get(saleId) || []
+    };
+    });
 
   const todayKey = new Date().toDateString();
   const paymentSummaryTodayMap = new Map<CheckoutPaymentMethod, {
@@ -3273,9 +3408,34 @@ router.get('/leads', requireAuth, async (req, res) => {
     companyId
   });
 
+  const crmRecords = await listCompanyCrmRecords(companyId);
+  const crmByLead = new Map(crmRecords.map((entry) => [entry.leadId, entry]));
+
+  const normalizedLeads = (leads.data || []).map((lead) => {
+    const row = lead as Record<string, unknown>;
+    const normalizedStatus = normalizeLeadStatus(row.status) || 'NOVO';
+    const leadId = String(row.id || '').trim();
+    const crmData = crmByLead.get(leadId);
+
+    return {
+      ...row,
+      status: normalizedStatus,
+      phone: crmData?.details.phone || String(row.phone || '').trim(),
+      email: crmData?.details.email || String(row.email || '').trim(),
+      source: crmData?.details.source || String(row.source || '').trim(),
+      interest: crmData?.details.interest || String(row.interest || '').trim(),
+      ownerId: crmData?.details.ownerId || String(row.owner_id || row.ownerId || '').trim(),
+      ownerName: crmData?.details.ownerName || String(row.owner_name || row.ownerName || '').trim(),
+      interactionsCount: crmData?.interactions.length || 0,
+      tasksOverdue: (crmData?.tasks || []).filter((task) =>
+        task.status === 'PENDENTE' && new Date(task.dueDate).getTime() < Date.now()
+      ).length
+    };
+  });
+
   return res.status(200).json({
     companyId,
-    leads: (leads.data || []).sort(
+    leads: normalizedLeads.sort(
       (left, right) => Number((left as Record<string, unknown>).position || 0) - Number((right as Record<string, unknown>).position || 0)
     ),
     error: leads.error || null
@@ -3288,10 +3448,17 @@ router.post('/leads', requireAuth, async (req, res) => {
   }
 
   const name = String(req.body?.name || '').trim();
-  const status = String(req.body?.status || 'NOVO_CONTATO').trim().toUpperCase();
+  const statusRaw = String(req.body?.status || 'NOVO').trim().toUpperCase();
+  const status = normalizeLeadStatus(statusRaw);
   const priority = String(req.body?.priority || 'MEDIA').trim().toUpperCase();
   const value = Number(req.body?.value || 0);
   const notes = String(req.body?.notes || '').trim();
+  const phone = String(req.body?.phone || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const source = String(req.body?.source || '').trim();
+  const interest = String(req.body?.interest || '').trim();
+  const ownerId = String(req.body?.ownerId || '').trim();
+  const ownerName = String(req.body?.ownerName || '').trim();
   const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
 
   if (!name) {
@@ -3302,7 +3469,7 @@ router.post('/leads', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'companyId e obrigatorio para criar lead.' });
   }
 
-  if (!leadStatuses.includes(status as (typeof leadStatuses)[number])) {
+  if (!status) {
     return res.status(400).json({ message: 'status invalido para lead.' });
   }
 
@@ -3310,7 +3477,7 @@ router.post('/leads', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'priority invalida para lead.' });
   }
 
-  const position = await getNextLeadPosition(companyId, status as LeadStatus);
+  const position = await getNextLeadPosition(companyId, status);
 
   let lastError: string | null = null;
 
@@ -3328,7 +3495,40 @@ router.post('/leads', requireAuth, async (req, res) => {
     const response = await insertWithAliases('leads', payload);
 
     if (!response.error) {
-      return res.status(201).json({ message: 'Lead criado com sucesso.', lead: response.data });
+      const createdLead = response.data as Record<string, unknown>;
+      const createdId = String(createdLead.id || '').trim();
+
+      if (createdId) {
+        await upsertLeadDetails(companyId, createdId, {
+          phone,
+          email,
+          source,
+          interest,
+          ownerId,
+          ownerName
+        });
+
+        await addLeadInteraction(companyId, createdId, {
+          type: 'NOTE',
+          content: 'Lead criado no CRM.',
+          createdById: req.authUser.id,
+          createdByName: req.authUser.email.split('@')[0] || 'Usuario'
+        });
+      }
+
+      return res.status(201).json({
+        message: 'Lead criado com sucesso.',
+        lead: {
+          ...createdLead,
+          status,
+          phone,
+          email,
+          source,
+          interest,
+          ownerId,
+          ownerName
+        }
+      });
     }
 
     lastError = response.error.message;
@@ -3343,7 +3543,7 @@ router.patch('/leads/:id/status', requireAuth, async (req, res) => {
   }
 
   const leadId = String(req.params.id || '').trim();
-  const status = String(req.body?.status || '').trim().toUpperCase();
+  const status = normalizeLeadStatus(req.body?.status);
   const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
 
   if (!leadId || !status) {
@@ -3354,11 +3554,7 @@ router.patch('/leads/:id/status', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'companyId e obrigatorio para atualizar lead.' });
   }
 
-  if (!leadStatuses.includes(status as (typeof leadStatuses)[number])) {
-    return res.status(400).json({ message: 'status invalido para lead.' });
-  }
-
-  const position = await getNextLeadPosition(companyId, status as LeadStatus);
+  const position = await getNextLeadPosition(companyId, status);
 
   const response = await updateLeadWithAliases(leadId, companyId, { status, position });
 
@@ -3380,6 +3576,12 @@ router.patch('/leads/:id', requireAuth, async (req, res) => {
   const priority = String(req.body?.priority || '').trim().toUpperCase();
   const notes = String(req.body?.notes || '').trim();
   const value = Number(req.body?.value || 0);
+  const phone = String(req.body?.phone || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const source = String(req.body?.source || '').trim();
+  const interest = String(req.body?.interest || '').trim();
+  const ownerId = String(req.body?.ownerId || '').trim();
+  const ownerName = String(req.body?.ownerName || '').trim();
 
   if (!leadId || !companyId) {
     return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
@@ -3403,6 +3605,15 @@ router.patch('/leads/:id', requireAuth, async (req, res) => {
   const response = await updateLeadWithAliases(leadId, companyId, payload);
 
   if (!response.error) {
+    await upsertLeadDetails(companyId, leadId, {
+      phone,
+      email,
+      source,
+      interest,
+      ownerId,
+      ownerName
+    });
+
     return res.status(200).json({ message: 'Lead atualizado com sucesso.', lead: response.data });
   }
 
@@ -3427,17 +3638,19 @@ router.patch('/leads/reorder', requireAuth, async (req, res) => {
 
   for (const item of updates) {
     const leadId = String(item?.id || '').trim();
-    const status = String(item?.status || '').trim().toUpperCase();
+    const status = normalizeLeadStatus(item?.status);
     const position = Number(item?.position);
 
-    if (!leadId || !leadStatuses.includes(status as LeadStatus) || !Number.isInteger(position) || position < 0) {
+    if (!leadId || !status || !Number.isInteger(position) || position < 0) {
       return res.status(400).json({ message: 'Payload invalido para reorder de leads.' });
     }
   }
 
   for (const item of updates) {
+    const normalizedStatus = normalizeLeadStatus(item.status);
+
     const response = await updateLeadWithAliases(String(item.id), companyId, {
-      status: String(item.status).toUpperCase(),
+      status: normalizedStatus,
       position: Number(item.position)
     });
 
@@ -3470,12 +3683,341 @@ router.delete('/leads/:id', requireAuth, async (req, res) => {
         .eq(companyField, companyId);
 
       if (!response.error) {
+        await removeLeadCrmRecord(companyId, leadId);
         return res.status(200).json({ message: 'Lead excluido com sucesso.' });
       }
     }
   }
 
   return res.status(400).json({ message: 'Falha ao excluir lead.' });
+});
+
+router.get('/crm/leads/:id/profile', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const leadId = String(req.params.id || '').trim();
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+
+  if (!leadId || !companyId) {
+    return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
+  }
+
+  const leads = await getScopedData('leads', {
+    id: req.authUser.id,
+    email: req.authUser.email,
+    role: 'CLIENT',
+    companyId
+  });
+
+  const leadRow = (leads.data || []).find((lead) => String((lead as Record<string, unknown>).id || '').trim() === leadId) as Record<string, unknown> | undefined;
+
+  if (!leadRow) {
+    return res.status(404).json({ message: 'Lead nao encontrado.' });
+  }
+
+  const crmBundle = await getLeadCrmBundle(companyId, leadId);
+  const sales = await getScopedData('sales', {
+    id: req.authUser.id,
+    email: req.authUser.email,
+    role: 'CLIENT',
+    companyId
+  });
+  const leadName = String(leadRow.name || '').trim().toLowerCase();
+  const leadEmail = String(crmBundle.details.email || '').trim().toLowerCase();
+  const relatedSales = (sales.data || []).filter((sale) => {
+    const row = sale as Record<string, unknown>;
+    const customerName = String(row.customer_name || row.customerName || '').trim().toLowerCase();
+    return Boolean(customerName) && (customerName === leadName || (leadEmail && customerName.includes(leadEmail)));
+  }) as Array<Record<string, unknown>>;
+
+  const totalGenerated = relatedSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+
+  return res.status(200).json({
+    lead: {
+      ...leadRow,
+      status: normalizeLeadStatus(leadRow.status) || 'NOVO',
+      ...crmBundle.details,
+      totalGenerated,
+      purchases: relatedSales,
+      interactions: crmBundle.interactions,
+      tasks: crmBundle.tasks
+    }
+  });
+});
+
+router.get('/crm/leads/:id/interactions', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const leadId = String(req.params.id || '').trim();
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+
+  if (!leadId || !companyId) {
+    return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
+  }
+
+  const interactions = await listLeadInteractions(companyId, leadId);
+  return res.status(200).json({ interactions });
+});
+
+router.post('/crm/leads/:id/interactions', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const leadId = String(req.params.id || '').trim();
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+  const typeRaw = String(req.body?.type || '').trim().toUpperCase();
+  const type = crmInteractionTypes.find((item) => item === typeRaw) as CrmInteractionType | undefined;
+  const content = String(req.body?.content || '').trim();
+  const happenedAt = String(req.body?.happenedAt || '').trim();
+
+  if (!leadId || !companyId) {
+    return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
+  }
+
+  if (!type || !content) {
+    return res.status(400).json({ message: 'type e content sao obrigatorios.' });
+  }
+
+  const interaction = await addLeadInteraction(companyId, leadId, {
+    type,
+    content,
+    happenedAt,
+    createdById: req.authUser.id,
+    createdByName: req.authUser.email.split('@')[0] || 'Usuario'
+  });
+
+  return res.status(201).json({ message: 'Interacao registrada com sucesso.', interaction });
+});
+
+router.get('/crm/leads/:id/tasks', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const leadId = String(req.params.id || '').trim();
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+
+  if (!leadId || !companyId) {
+    return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
+  }
+
+  const tasks = await listLeadTasks(companyId, leadId);
+  return res.status(200).json({ tasks });
+});
+
+router.post('/crm/leads/:id/tasks', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const leadId = String(req.params.id || '').trim();
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+  const title = String(req.body?.title || '').trim();
+  const dueDate = String(req.body?.dueDate || '').trim();
+  const priorityRaw = String(req.body?.priority || '').trim().toUpperCase();
+  const priority = crmTaskPriorities.find((item) => item === priorityRaw) as CrmTaskPriority | undefined;
+  const assignedToId = String(req.body?.assignedToId || '').trim();
+  const assignedToName = String(req.body?.assignedToName || '').trim();
+
+  if (!leadId || !companyId) {
+    return res.status(400).json({ message: 'id e companyId sao obrigatorios.' });
+  }
+
+  if (!title || !dueDate || !priority) {
+    return res.status(400).json({ message: 'title, dueDate e priority sao obrigatorios.' });
+  }
+
+  const task = await createLeadTask(companyId, leadId, {
+    title,
+    dueDate,
+    priority,
+    assignedToId,
+    assignedToName
+  });
+
+  return res.status(201).json({ message: 'Tarefa criada com sucesso.', task });
+});
+
+router.patch('/crm/leads/:id/tasks/:taskId', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const leadId = String(req.params.id || '').trim();
+  const taskId = String(req.params.taskId || '').trim();
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.body?.companyId);
+  const statusRaw = String(req.body?.status || '').trim().toUpperCase();
+  const priorityRaw = String(req.body?.priority || '').trim().toUpperCase();
+  const status = statusRaw ? (crmTaskStatuses.find((item) => item === statusRaw) as CrmTaskStatus | undefined) : undefined;
+  const priority = priorityRaw ? (crmTaskPriorities.find((item) => item === priorityRaw) as CrmTaskPriority | undefined) : undefined;
+
+  if (!leadId || !taskId || !companyId) {
+    return res.status(400).json({ message: 'leadId, taskId e companyId sao obrigatorios.' });
+  }
+
+  const updated = await updateLeadTask(companyId, leadId, taskId, {
+    title: req.body?.title,
+    dueDate: req.body?.dueDate,
+    assignedToId: req.body?.assignedToId,
+    assignedToName: req.body?.assignedToName,
+    status,
+    priority
+  });
+
+  if (!updated) {
+    return res.status(404).json({ message: 'Tarefa nao encontrada.' });
+  }
+
+  return res.status(200).json({ message: 'Tarefa atualizada com sucesso.', task: updated });
+});
+
+router.delete('/crm/leads/:id/tasks/:taskId', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const leadId = String(req.params.id || '').trim();
+  const taskId = String(req.params.taskId || '').trim();
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+
+  if (!leadId || !taskId || !companyId) {
+    return res.status(400).json({ message: 'leadId, taskId e companyId sao obrigatorios.' });
+  }
+
+  const deleted = await deleteLeadTask(companyId, leadId, taskId);
+
+  if (!deleted) {
+    return res.status(404).json({ message: 'Tarefa nao encontrada.' });
+  }
+
+  return res.status(200).json({ message: 'Tarefa removida com sucesso.' });
+});
+
+router.get('/crm/metrics', requireAuth, async (req, res) => {
+  if (!req.authUser) {
+    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+  }
+
+  const companyId = resolveCompanyId(req.authUser.role, req.authUser.companyId, req.query.companyId);
+  const ownerIdFilter = String(req.query.ownerId || '').trim();
+
+  if (!companyId) {
+    return res.status(400).json({ message: 'companyId e obrigatorio.' });
+  }
+
+  const leadsScoped = await getScopedData('leads', {
+    id: req.authUser.id,
+    email: req.authUser.email,
+    role: 'CLIENT',
+    companyId
+  });
+  const salesScoped = await getScopedData('sales', {
+    id: req.authUser.id,
+    email: req.authUser.email,
+    role: 'CLIENT',
+    companyId
+  });
+  const crmRecords = await listCompanyCrmRecords(companyId);
+  const detailsByLead = new Map(crmRecords.map((entry) => [entry.leadId, entry.details]));
+
+  const leads = (leadsScoped.data || []).map((lead) => {
+    const row = lead as Record<string, unknown>;
+    const id = String(row.id || '').trim();
+    const details = detailsByLead.get(id);
+    return {
+      ...row,
+      id,
+      createdAt: String(row.created_at || row.createdAt || ''),
+      status: normalizeLeadStatus(row.status) || 'NOVO',
+      ownerId: details?.ownerId || String(row.owner_id || row.ownerId || '').trim(),
+      ownerName: details?.ownerName || String(row.owner_name || row.ownerName || '').trim() || 'Sem responsavel',
+      name: String(row.name || '').trim()
+    };
+  }).filter((lead) => (ownerIdFilter ? lead.ownerId === ownerIdFilter : true));
+
+  const totalLeads = leads.length;
+  const won = leads.filter((lead) => lead.status === 'FECHADO').length;
+  const lost = leads.filter((lead) => lead.status === 'PERDIDO').length;
+  const conversionRate = totalLeads > 0 ? (won / totalLeads) * 100 : 0;
+
+  const closureDays = leads
+    .filter((lead) => lead.status === 'FECHADO')
+    .map((lead) => {
+      const created = new Date(lead.createdAt);
+
+      if (Number.isNaN(created.getTime())) {
+        return null;
+      }
+
+      const interactions = (crmRecords.find((item) => item.leadId === lead.id)?.interactions || [])
+        .filter((interaction) => interaction.type === 'SALE')
+        .sort((left, right) => new Date(left.happenedAt).getTime() - new Date(right.happenedAt).getTime());
+
+      const closedAt = interactions[0]?.happenedAt || new Date().toISOString();
+      const closedDate = new Date(closedAt);
+
+      if (Number.isNaN(closedDate.getTime())) {
+        return null;
+      }
+
+      return (closedDate.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
+    })
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value >= 0);
+
+  const avgCloseDays = closureDays.length
+    ? closureDays.reduce((sum, value) => sum + value, 0) / closureDays.length
+    : 0;
+
+  const salesRows = (salesScoped.data || []) as Array<Record<string, unknown>>;
+  const rankingMap = new Map<string, { ownerId: string; ownerName: string; leads: number; won: number; lost: number; revenue: number }>();
+
+  for (const lead of leads) {
+    const key = lead.ownerId || `owner:${lead.ownerName}`;
+
+    if (!rankingMap.has(key)) {
+      rankingMap.set(key, {
+        ownerId: lead.ownerId,
+        ownerName: lead.ownerName,
+        leads: 0,
+        won: 0,
+        lost: 0,
+        revenue: 0
+      });
+    }
+
+    const item = rankingMap.get(key)!;
+    item.leads += 1;
+    if (lead.status === 'FECHADO') item.won += 1;
+    if (lead.status === 'PERDIDO') item.lost += 1;
+
+    const leadName = String(lead.name || '').trim().toLowerCase();
+    const salesByLead = salesRows.filter((sale) => String(sale.customer_name || sale.customerName || '').trim().toLowerCase() === leadName);
+    item.revenue += salesByLead.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+  }
+
+  const ranking = Array.from(rankingMap.values()).sort((left, right) => {
+    if (right.won !== left.won) {
+      return right.won - left.won;
+    }
+
+    return right.revenue - left.revenue;
+  });
+
+  return res.status(200).json({
+    metrics: {
+      totalLeads,
+      won,
+      lost,
+      conversionRate,
+      avgCloseDays
+    },
+    ranking
+  });
 });
 
 export default router;
