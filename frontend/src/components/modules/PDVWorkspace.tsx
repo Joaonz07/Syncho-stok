@@ -89,6 +89,7 @@ type Register = {
   id: string;
   nome: string;
   operador: string;
+  authorizationCode: string;
   status: RegisterStatus;
   ultimaVenda?: string;
   abertura?: string;
@@ -135,10 +136,7 @@ const MOCK_PRODUCTS: Product[] = [
 ];
 
 const INITIAL_REGISTERS: Register[] = [
-  { id: 'cx1', nome: 'Caixa 01', operador: 'Você', status: 'online', abertura: new Date().toISOString(), fundoAbertura: 150, vendasHoje: 12, totalHoje: 487.3 },
-  { id: 'cx2', nome: 'Caixa 02', operador: 'Maria Santos', status: 'online', vendasHoje: 8, totalHoje: 312.15 },
-  { id: 'cx3', nome: 'Caixa 03', operador: '', status: 'idle', vendasHoje: 0, totalHoje: 0 },
-  { id: 'cx4', nome: 'Caixa 04', operador: '', status: 'offline', vendasHoje: 5, totalHoje: 198.7 },
+  // Inicia vazio para evitar dados fictícios em produção.
 ];
 
 // ─── HELPERS ─────────────────────────────────────────────────
@@ -236,7 +234,7 @@ function buildProductsFromShared(): Product[] {
   const shared = readSharedProducts().filter((item) => item.enabledInPDV !== false);
 
   if (!shared.length) {
-    return MOCK_PRODUCTS;
+    return import.meta.env.DEV ? MOCK_PRODUCTS : [];
   }
 
   const movements = readSharedStockMovements() as StockMove[];
@@ -342,6 +340,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
   const [activeRegisterId, setActiveRegisterId] = useState<string>(INITIAL_REGISTERS[0]?.id || '');
   const [newRegisterName, setNewRegisterName] = useState('');
   const [newRegisterOperator, setNewRegisterOperator] = useState('');
+  const [newRegisterAuthorization, setNewRegisterAuthorization] = useState('');
   const [openingAmount, setOpeningAmount] = useState('100');
   const [historySearch, setHistorySearch] = useState('');
   const [historyMethod, setHistoryMethod] = useState<PaymentMethod | 'todos'>('todos');
@@ -362,14 +361,19 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
   const createRegister = () => {
     const registerName = newRegisterName.trim();
     const operatorName = newRegisterOperator.trim();
+    const authorizationCode = newRegisterAuthorization.trim();
 
-    if (!registerName || !operatorName) {
-      showToast?.('Informe nome do caixa e operador.');
+    if (!registerName || !operatorName || !authorizationCode) {
+      showToast?.('Informe nome do caixa, operador e codigo de autorizacao.');
+      return;
+    }
+
+    if (authorizationCode.length < 4) {
+      showToast?.('Use um codigo de autorizacao com pelo menos 4 caracteres.');
       return;
     }
 
     const createdId = `cx-${Date.now().toString().slice(-6)}`;
-    const openedAt = new Date().toISOString();
     const openingCash = Math.max(0, Number(openingAmount || 0));
 
     setRegisters((prev) => [
@@ -377,22 +381,41 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
         id: createdId,
         nome: registerName,
         operador: operatorName,
-        status: 'online',
-        abertura: openedAt,
+        authorizationCode,
+        status: 'idle',
         fundoAbertura: openingCash,
         vendasHoje: 0,
         totalHoje: 0,
       },
       ...prev,
     ]);
-    setActiveRegisterId(createdId);
+    if (!activeRegisterId) {
+      setActiveRegisterId(createdId);
+    }
     setNewRegisterName('');
     setNewRegisterOperator('');
+    setNewRegisterAuthorization('');
     setOpeningAmount('100');
-    showToast?.('Caixa criado e aberto com sucesso.');
+    showToast?.('Caixa criado. Use autorizacao para abrir.');
   };
 
   const openRegister = (registerId: string) => {
+    const target = registers.find((register) => register.id === registerId) || null;
+    if (!target) {
+      return;
+    }
+
+    if (!String(target.nome || '').trim() || !String(target.operador || '').trim()) {
+      showToast?.('Nao e permitido abrir caixa sem nome e operador.');
+      return;
+    }
+
+    const providedCode = window.prompt(`Autorize a abertura do ${target.nome} com o codigo do caixa:`) || '';
+    if (String(providedCode).trim() !== String(target.authorizationCode || '').trim()) {
+      showToast?.('Codigo de autorizacao invalido.');
+      return;
+    }
+
     setRegisters((prev) => prev.map((register) => {
       if (register.id !== registerId) {
         return register;
@@ -404,11 +427,11 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
         abertura: new Date().toISOString(),
         fechamento: undefined,
         fundoAbertura: Number(register.fundoAbertura || 0),
-        operador: register.operador || 'Operador',
+        operador: register.operador,
       };
     }));
     setActiveRegisterId(registerId);
-    showToast?.('Caixa aberto.');
+    showToast?.('Caixa aberto com autorizacao.');
   };
 
   const closeRegister = (registerId: string) => {
@@ -828,13 +851,31 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={activeRegisterId}
-            onChange={(event) => setActiveRegisterId(event.target.value)}
+            onChange={(event) => {
+              const selectedId = event.target.value;
+              const selectedRegister = registers.find((register) => register.id === selectedId) || null;
+
+              if (!selectedRegister) {
+                setActiveRegisterId('');
+                return;
+              }
+
+              if (selectedRegister.status !== 'online') {
+                showToast?.('Selecione apenas um caixa aberto para operar no PDV.');
+                return;
+              }
+
+              setActiveRegisterId(selectedId);
+            }}
             className="rounded-lg border border-white/10 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-100"
             style={{ colorScheme: 'dark' }}
           >
+            {!registers.length ? (
+              <option value="">Sem caixas cadastrados</option>
+            ) : null}
             {registers.map((register) => (
               <option key={register.id} value={register.id}>
-                {register.nome}
+                {register.nome} ({register.status === 'online' ? 'aberto' : 'fechado'})
               </option>
             ))}
           </select>
@@ -1514,7 +1555,7 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                 </span>
               </div>
 
-              <div className="mb-4 grid gap-2 rounded-2xl border border-white/10 bg-slate-800/60 p-4 md:grid-cols-[1.2fr_1fr_1fr_auto]">
+              <div className="mb-4 grid gap-2 rounded-2xl border border-white/10 bg-slate-800/60 p-4 md:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
                 <input
                   value={newRegisterName}
                   onChange={(event) => setNewRegisterName(event.target.value)}
@@ -1535,6 +1576,12 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                   type="number"
                   min="0"
                   step="0.01"
+                />
+                <input
+                  value={newRegisterAuthorization}
+                  onChange={(event) => setNewRegisterAuthorization(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 outline-none"
+                  placeholder="Codigo de autorizacao"
                 />
                 <button
                   type="button"
@@ -1568,13 +1615,20 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
                           <p className="text-sm font-black text-slate-100">{reg.nome}</p>
                           <input
                             value={reg.operador}
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              const nextOperator = event.target.value;
+
+                              if (reg.status === 'online' && !nextOperator.trim()) {
+                                showToast?.('Nao e permitido deixar caixa aberto sem operador.');
+                                return;
+                              }
+
                               setRegisters((prev) =>
                                 prev.map((item) =>
-                                  item.id === reg.id ? { ...item, operador: event.target.value } : item,
+                                  item.id === reg.id ? { ...item, operador: nextOperator } : item,
                                 ),
-                              )
-                            }
+                              );
+                            }}
                             className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/60 px-2 py-1 text-xs text-slate-100 outline-none"
                             placeholder="Operador"
                           />
@@ -1645,7 +1699,14 @@ export default function PDVWorkspace({ showToast }: PDVWorkspaceProps) {
 
                     <button
                       type="button"
-                      onClick={() => setActiveRegisterId(reg.id)}
+                      onClick={() => {
+                        if (reg.status !== 'online') {
+                          showToast?.('Apenas caixas abertos podem ser selecionados como ativos.');
+                          return;
+                        }
+
+                        setActiveRegisterId(reg.id);
+                      }}
                       className={`mt-2 w-full rounded-xl py-2 text-xs font-semibold ${
                         activeRegisterId === reg.id
                           ? 'bg-cyan-500/20 text-cyan-300'
